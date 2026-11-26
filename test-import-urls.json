@@ -1,0 +1,28 @@
+{
+  "_comment": "Animal YouTube Shorts for testing the importer. POST the 'batch' object to /api/imports/batch, and each 'expansion_tests' entry to /api/imports.",
+  "batch": {
+    "tags": ["test-import"],
+    "urls": [
+      "https://www.youtube.com/shorts/rYvbUYtXvME",
+      "https://www.youtube.com/shorts/q0gReLz2efU",
+      "https://www.youtube.com/shorts/NsxgSLOgKN0",
+      "https://www.youtube.com/shorts/4KlNd1zJUHs",
+      "https://www.youtube.com/shorts/KzwNlSDqKg0",
+      "https://www.youtube.com/shorts/l7frXfTDDag",
+      "https://www.youtube.com/shorts/sBbC-wU60A8",
+      "https://www.youtube.com/shorts/O9KiCu1MRLQ",
+      "https://www.youtube.com/shorts/8XDOuBHjYeQ",
+      "https://www.youtube.com/shorts/0ph4dw_QDDY",
+      "https://www.youtube.com/shorts/q_2lLod0kKE",
+      "https://www.youtube.com/shorts/1SFtNpkItHg",
+      "https://www.youtube.com/shorts/9d52SE3hP2k",
+      "https://www.youtube.com/shorts/vmf6r-fN60w",
+      "https://www.youtube.com/watch?v=0KVI7gBfeO8",
+      "https://www.youtube.com/shorts/rYvbUYtXvME"
+    ]
+  },
+  "expansion_tests": [
+    { "url": "https://www.youtube.com/playlist?list=PL2g6Hr5ZLeMYzO5-yOi6yZnR8KonfNZTc", "expand_playlists": true, "max_items": 10 },
+    { "url": "https://www.youtube.com/@BBCEarthKids/shorts", "expand_playlists": true, "max_items": 5 }
+  ]
+}

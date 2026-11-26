@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verdict - Video Player Mockup</title>
+<style>
+  :root { --like:#22c55e; --nope:#ef4444; --fav:#f43f5e; --ink:#fff; --muted:rgba(255,255,255,.7); }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:#111318; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); }
+  .stage { min-height:100%; display:flex; gap:40px; align-items:center; justify-content:center; padding:24px; }
+  .notes { max-width:320px; color:#cfd3dc; font-size:14px; line-height:1.5; }
+  .notes h1 { font-size:20px; color:#fff; margin:0 0 8px; }
+  .notes h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#8b93a5; margin:18px 0 6px; }
+  .notes ul { margin:0; padding-left:18px; }
+  .notes .btns { display:flex; gap:8px; margin-top:14px; }
+  .notes button { flex:1; padding:10px; border-radius:10px; border:0; font-weight:600; cursor:pointer; color:#fff; }
+  .b-nope { background:var(--nope); } .b-like { background:var(--like); } .b-nav { background:#2a2f3a; }
+
+  /* Phone frame */
+  .phone { width:390px; height:844px; border-radius:48px; padding:12px; background:#000; box-shadow:0 0 0 2px #2a2f3a, 0 30px 80px rgba(0,0,0,.6); flex:none; }
+  .screen { position:relative; width:100%; height:100%; border-radius:38px; overflow:hidden; background:#000; touch-action:none; user-select:none; }
+  @media (max-width:760px) {
+    .stage { padding:0; display:block; }
+    .notes { display:none; }
+    .phone { width:100vw; height:100dvh; border-radius:0; padding:0; box-shadow:none; }
+    .screen { border-radius:0; }
+  }
+
+  /* Cards */
+  .track { position:absolute; inset:0; }
+  .card { position:absolute; inset:0; background:#000; will-change:transform; }
+  .media-wrap { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .media { position:relative; overflow:hidden; }
+  .media .blob { position:absolute; width:70%; aspect-ratio:1; border-radius:50%; filter:blur(30px); opacity:.75; animation:drift 6s ease-in-out infinite alternate; }
+  .media .blob.b2 { animation-duration:8s; animation-direction:alternate-reverse; right:-10%; bottom:-10%; }
+  .media .label { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:13px; letter-spacing:.1em; color:rgba(255,255,255,.55); text-transform:uppercase; }
+  .paused .blob { animation-play-state:paused; }
+  @keyframes drift { from { transform:translate(-10%,-5%) scale(1); } to { transform:translate(25%,30%) scale(1.3); } }
+  .progress { position:absolute; left:0; right:0; bottom:64px; height:3px; background:rgba(255,255,255,.2); z-index:3; }
+  .progress i { display:block; height:100%; width:0; background:#fff; animation:prog 12s linear infinite; }
+  .paused .progress i { animation-play-state:paused; }
+  @keyframes prog { to { width:100%; } }
+  .playicon { position:absolute; inset:0; display:none; align-items:center; justify-content:center; z-index:4; pointer-events:none; }
+  .paused .playicon { display:flex; }
+  .playicon div { width:72px; height:72px; border-radius:50%; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; }
+
+  /* Stamps */
+  .stamp { position:absolute; top:110px; padding:6px 14px; border:4px solid; border-radius:10px; font-size:34px; font-weight:900; letter-spacing:.08em; opacity:0; z-index:6; pointer-events:none; }
+  .stamp.like { left:24px; color:var(--like); border-color:var(--like); transform:rotate(-14deg); }
+  .stamp.nope { right:24px; color:var(--nope); border-color:var(--nope); transform:rotate(14deg); }
+
+  /* Overlays */
+  .shade { position:absolute; left:0; right:0; bottom:0; height:45%; background:linear-gradient(transparent, rgba(0,0,0,.75)); z-index:2; pointer-events:none; }
+  .topbar { position:absolute; top:calc(14px + env(safe-area-inset-top)); left:16px; right:16px; display:flex; justify-content:space-between; align-items:center; z-index:5; }
+  .pill { background:rgba(0,0,0,.45); backdrop-filter:blur(8px); padding:6px 12px; border-radius:999px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; }
+  .badge { display:none; } .badge.show { display:flex; }
+  .badge.up { color:var(--like); } .badge.down { color:var(--nope); }
+  .iconbtn { background:rgba(0,0,0,.45); backdrop-filter:blur(8px); border:0; color:#fff; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+
+  .info { position:absolute; left:16px; right:76px; bottom:80px; z-index:5; }
+  .creator { display:flex; align-items:center; gap:10px; margin-bottom:10px; cursor:pointer; }
+  .avatar { width:40px; height:40px; border-radius:50%; border:2px solid #fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; flex:none; }
+  .cname { font-weight:700; font-size:15px; }
+  .csrc { font-size:12px; color:var(--muted); }
+  .title { font-size:14px; margin:0 0 8px; color:#f1f1f1; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .chip { font-size:12px; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.16); backdrop-filter:blur(6px); border:0; color:#fff; cursor:pointer; }
+  .expand { background:none; border:0; color:#fff; padding:4px 6px; cursor:pointer; display:flex; align-items:center; }
+
+  .rail { position:absolute; right:12px; bottom:96px; display:flex; flex-direction:column; gap:18px; z-index:5; align-items:center; }
+  .rbtn { background:none; border:0; color:#fff; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; cursor:pointer; }
+  .rbtn .circ { width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,.4); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; }
+  .rbtn.on .circ { color:var(--fav); }
+  .rbtn.disabled { opacity:.55; cursor:default; }
+  .pop { animation:pop .35s ease; }
+  @keyframes pop { 40% { transform:scale(1.35); } 100% { transform:scale(1); } }
+
+  /* Bottom nav */
+  .nav { position:absolute; left:0; right:0; bottom:0; height:64px; padding-bottom:env(safe-area-inset-bottom); display:flex; justify-content:space-around; align-items:center; background:rgba(0,0,0,.55); backdrop-filter:blur(12px); border-top:1px solid rgba(255,255,255,.08); z-index:7; }
+  .nav div { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10px; color:rgba(255,255,255,.6); }
+  .nav div.active { color:#fff; }
+
+  /* Sheets */
+  .scrim { position:absolute; inset:0; background:rgba(0,0,0,.35); opacity:0; pointer-events:none; transition:opacity .25s; z-index:8; }
+  .scrim.show { opacity:1; pointer-events:auto; }
+  .sheet { position:absolute; left:0; right:0; bottom:0; max-height:72%; overflow:auto; background:#16181d; border-radius:20px 20px 0 0; padding:10px 18px 28px; transform:translateY(105%); transition:transform .3s cubic-bezier(.2,.8,.2,1); z-index:9; }
+  .sheet.show { transform:none; }
+  .grab { width:40px; height:5px; border-radius:3px; background:#3a3f4b; margin:0 auto 12px; }
+  .sheet h3 { margin:4px 0 4px; font-size:17px; }
+  .sheet .desc { color:#aab0bd; font-size:13px; margin:0 0 14px; }
+  .sheet h4 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#7d8496; margin:16px 0 8px; }
+  .kv { display:grid; grid-template-columns:120px 1fr; gap:6px 10px; font-size:13px; }
+  .kv span:nth-child(odd) { color:#8b93a5; }
+  .tagrow { display:flex; flex-wrap:wrap; gap:6px; }
+  .tagrow .chip { background:#262a33; }
+  .tagrow .chip b { font-weight:600; margin-left:4px; }
+  .pos { color:var(--like); } .neg { color:var(--nope); } .zero { color:#8b93a5; }
+  .sheetbtns { display:flex; gap:8px; margin-top:16px; }
+  .sheetbtns button { flex:1; padding:10px; border-radius:10px; border:0; background:#262a33; color:#fff; font-size:13px; cursor:pointer; }
+  .colrow { display:flex; align-items:center; justify-content:space-between; padding:12px 2px; border-bottom:1px solid #23262e; font-size:15px; }
+  .colrow small { color:#7d8496; display:block; font-size:12px; }
+  .colrow input { width:20px; height:20px; accent-color:var(--fav); }
+
+  .toast { position:absolute; left:50%; top:70px; transform:translate(-50%,-10px); background:rgba(20,20,24,.92); padding:8px 14px; border-radius:999px; font-size:13px; opacity:0; transition:all .25s; z-index:10; white-space:nowrap; }
+  .toast.show { opacity:1; transform:translate(-50%,0); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="notes">
+    <h1>Verdict: video player mockup</h1>
+    <p>Interactive. Drag with the mouse or touch, or use the keyboard.</p>
+    <h2>Gestures</h2>
+    <ul>
+      <li>Drag right past 30% = Like, left = Dislike (auto-advance)</li>
+      <li>Drag up = next video, down = previous (no rating)</li>
+      <li>Tap video = play / pause</li>
+      <li>Heart = Favorite, stays on this video</li>
+      <li>Chevron next to tags = details sheet</li>
+    </ul>
+    <h2>Keyboard</h2>
+    <ul><li>Left / Right = rate, Up / Down = navigate, Space = pause, F = favorite, I = details</li></ul>
+    <h2>Notes</h2>
+    <ul>
+      <li>Video 2 is landscape to show letterboxing (contain fit, no stretch)</li>
+      <li>Video 3 has no audio, so the mute button shows "No sound"</li>
+      <li>Coloured blocks stand in for real video</li>
+    </ul>
+    <div class="btns">
+      <button class="b-nope" onclick="commitRate(-1)">Dislike</button>
+      <button class="b-nav" onclick="go(1)">Skip</button>
+      <button class="b-like" onclick="commitRate(1)">Like</button>
+    </div>
+  </div>
+
+  <div class="phone"><div class="screen" id="screen">
+    <div class="track" id="track"></div>
+
+    <div class="topbar">
+      <div class="pill badge" id="badge"></div>
+      <button class="iconbtn" aria-label="Search" style="margin-left:auto">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      </button>
+    </div>
+
+    <div class="nav">
+      <div class="active"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Feed</div>
+      <div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Library</div>
+      <div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>Collections</div>
+      <div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Account</div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div class="scrim" id="scrim" onclick="closeSheets()"></div>
+    <div class="sheet" id="details"></div>
+    <div class="sheet" id="collections"></div>
+  </div></div>
+</div>
+
+<script>
+const vids = [
+  { title:"Night session at the coast road", desc:"Tandem runs after dark, shot on a gimbal from the chase car.", creator:"Coastal Drift", handle:"@coastaldrift", source:"YouTube", domain:"youtube.com",
+    tags:[["drift",14],["cars",9],["night",3],["jdm",6],["track",2],["tandem",1]], w:1080, h:1920, c:["#2b5876","#4e4376","#f7797d"], av:"#0ea5e9",
+    file:"abc123.mp4", size:"18.4 MB", dur:"0:42", fps:"30", vc:"h264", ac:"aac", audio:true, up:"the 4th of November 2026", imp:"the 20th of November 2026" },
+  { title:"First lift of the season, Alps POV", desc:"Helmet cam from the top station down the red run.", creator:"Alpine Lines", handle:"@alpinelines", source:"Vimeo", domain:"vimeo.com",
+    tags:[["ski",5],["snow",4],["pov",-2],["alps",1]], w:1920, h:1080, c:["#83a4d4","#b6fbff","#2c3e50"], av:"#10b981",
+    file:"88123401.mp4", size:"46.0 MB", dur:"1:58", fps:"60", vc:"h264", ac:"aac", audio:true, up:"the 2nd of November 2026", imp:"the 21st of November 2026" },
+  { title:"10 minute garlic butter pasta", desc:"Silent recipe clip, captions only.", creator:"Kitchen Notes", handle:"@kitchennotes", source:"TikTok", domain:"tiktok.com",
+    tags:[["cooking",7],["pasta",3],["quick",0],["recipe",5],["vegetarian",-1]], w:720, h:1280, c:["#f12711","#f5af19","#3a1c71"], av:"#f59e0b",
+    file:"7301928374.mp4", size:"6.2 MB", dur:"0:27", fps:"30", vc:"h264", ac:"none", audio:false, up:"the 18th of November 2026", imp:"the 22nd of November 2026" }
+];
+let idx = 0, muted = true, paused = false;
+const ratings = {}, favs = {};
+const track = document.getElementById('track'), screen = document.getElementById('screen');
+
+const ICON = {
+  heart:(f)=>`<svg width="24" height="24" viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M12 21s-7.5-4.6-9.5-9.3C1.2 8.5 3.3 5 6.8 5c2 0 3.5 1.1 5.2 3 1.7-1.9 3.2-3 5.2-3 3.5 0 5.6 3.5 4.3 6.7C19.5 16.4 12 21 12 21z"/></svg>`,
+  add:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h11M4 11h11M4 16h7M18 13v8M14 17h8"/></svg>`,
+  mute:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>`,
+  sound:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 8.5a5 5 0 0 1 0 7M19.5 6a8.5 8.5 0 0 1 0 12"/></svg>`,
+  nosound:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M3 3l18 18"/></svg>`,
+  chev:`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>`,
+  play:`<svg width="34" height="34" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>`,
+  up:`<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13.2 1 6.6 7.6C6.2 7.9 6 8.4 6 9v10c0 1.1.9 2 2 2h9c.8 0 1.5-.5 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2z"/></svg>`,
+};
+const sc = n => n>0?'pos':n<0?'neg':'zero';
+const sgn = n => n>0?'+'+n:''+n;
+
+function fit(v) {
+  const W = screen.clientWidth, H = screen.clientHeight, ar = v.w/v.h;
+  let w = W, h = W/ar; if (h > H) { h = H; w = H*ar; }
+  return [w,h];
+}
+
+function cardHTML(v) {
+  const [w,h] = fit(v);
+  const shown = v.tags.slice(0,3).map(t=>`<button class="chip">#${t[0]}</button>`).join('');
+  const more = v.tags.length>3 ? `<button class="chip" onclick="openDetails()">+${v.tags.length-3}</button>` : '';
+  const i = vids.indexOf(v);
+  const soundBtn = v.audio
+    ? `<button class="rbtn" id="mutebtn" onclick="toggleMute()"><span class="circ">${muted?ICON.mute:ICON.sound}</span><span>${muted?'Muted':'Sound'}</span></button>`
+    : `<button class="rbtn disabled"><span class="circ">${ICON.nosound}</span><span>No sound</span></button>`;
+  return `
+    <div class="media-wrap"><div class="media" style="width:${w}px;height:${h}px;background:${v.c[2]}">
+      <div class="blob" style="background:${v.c[0]}"></div><div class="blob b2" style="background:${v.c[1]}"></div>
+      <div class="label">${v.w} x ${v.h}</div>
+    </div></div>
+    <div class="playicon"><div>${ICON.play}</div></div>
+    <div class="stamp like">LIKE</div><div class="stamp nope">NOPE</div>
+    <div class="shade"></div>
+    <div class="info">
+      <div class="creator">
+        <div class="avatar" style="background:${v.av}">${v.creator.split(' ').map(s=>s[0]).join('')}</div>
+        <div><div class="cname">${v.handle}</div><div class="csrc">${v.creator} &middot; ${v.source}</div></div>
+      </div>
+      <p class="title">${v.title}</p>
+      <div class="chips">${shown}${more}<button class="expand" aria-label="Details" onclick="openDetails()">${ICON.chev}</button></div>
+    </div>
+    <div class="rail">
+      <button class="rbtn ${favs[i]?'on':''}" id="favbtn" onclick="toggleFav()"><span class="circ">${ICON.heart(favs[i])}</span><span>Favorite</span></button>
+      <button class="rbtn" onclick="openCollections()"><span class="circ">${ICON.add}</span><span>Save</span></button>
+      ${soundBtn}
+    </div>
+    <div class="progress"><i></i></div>`;
+}
+
+let card = null;
+function render(dir) {
+  const el = document.createElement('div');
+  el.className = 'card' + (paused ? ' paused' : '');
+  el.innerHTML = cardHTML(vids[idx]);
+  track.appendChild(el);
+  const old = card; card = el;
+  if (dir) {
+    el.style.transform = `translateY(${dir*100}%)`;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      el.style.transition = 'transform .35s cubic-bezier(.2,.8,.2,1)'; el.style.transform = 'none';
+      if (old) { old.style.transition = el.style.transition; old.style.transform = `translateY(${-dir*100}%)`; }
+    }));
+    setTimeout(()=>{ old && old.remove(); el.style.transition=''; }, 380);
+  } else if (old) old.remove();
+  updateBadge();
+}
+
+function updateBadge() {
+  const b = document.getElementById('badge'), r = ratings[idx];
+  b.className = 'pill badge' + (r ? ' show ' + (r>0?'up':'down') : '');
+  b.innerHTML = r ? `<span style="display:inline-flex;${r<0?'transform:rotate(180deg)':''}">${ICON.up}</span>${r>0?'Liked':'Disliked'}` : '';
+}
+
+function go(d) {
+  if (d < 0 && idx === 0) { spring(); toast('This is the first video'); return; }
+  idx = (idx + d + vids.length) % vids.length; paused = false; render(d);
+}
+
+function commitRate(v) {
+  if (!card) return;
+  const prev = ratings[idx];
+  if (prev === v) { spring(); toast(v>0?'Already liked':'Already disliked'); return; }
+  ratings[idx] = v;
+  toast(v>0 ? (prev ? 'Changed to Like, added to Liked' : 'Liked, added to Liked') : (prev ? 'Changed to Dislike, removed from Liked' : 'Disliked'));
+  const c = card;
+  c.querySelector(v>0?'.stamp.like':'.stamp.nope').style.opacity = 1;
+  c.style.transition = 'transform .3s ease-in';
+  c.style.transform = `translateX(${v*140}%) rotate(${v*25}deg)`;
+  setTimeout(()=>{ idx = (idx+1)%vids.length; paused=false; render(1); setTimeout(()=>c.remove(),400); }, 260);
+}
+
+function spring() {
+  if (!card) return;
+  card.style.transition = 'transform .3s cubic-bezier(.2,.8,.2,1.2)'; card.style.transform = 'none';
+  card.querySelectorAll('.stamp').forEach(s=>s.style.opacity=0);
+  setTimeout(()=>card && (card.style.transition=''), 320);
+}
+
+function togglePause() { paused = !paused; card.classList.toggle('paused', paused); }
+function toggleMute() { muted = !muted; const b = document.getElementById('mutebtn'); b.innerHTML = `<span class="circ">${muted?ICON.mute:ICON.sound}</span><span>${muted?'Muted':'Sound'}</span>`; }
+function toggleFav() {
+  favs[idx] = !favs[idx];
+  const b = card.querySelector('#favbtn'); b.classList.toggle('on', favs[idx]);
+  b.querySelector('.circ').innerHTML = ICON.heart(favs[idx]);
+  b.querySelector('.circ').classList.remove('pop'); void b.offsetWidth; b.querySelector('.circ').classList.add('pop');
+  toast(favs[idx] ? 'Added to Favorites' : 'Removed from Favorites');
+}
+
+let tt; function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(()=>t.classList.remove('show'), 1600); }
+
+function openDetails() {
+  const v = vids[idx], r = ratings[idx];
+  document.getElementById('details').innerHTML = `
+    <div class="grab"></div>
+    <h3>${v.title}</h3><p class="desc">${v.desc}</p>
+    <h4>Tags (your score)</h4>
+    <div class="tagrow">${v.tags.map(t=>`<button class="chip">#${t[0]}<b class="${sc(t[1])}">${sgn(t[1])}</b></button>`).join('')}</div>
+    <h4>Creator and source</h4>
+    <div class="kv">
+      <span>Creator</span><span>${v.creator} (${v.handle}) <b class="pos">+8</b></span>
+      <span>Source</span><span>${v.source} (${v.domain})</span>
+      <span>Original</span><span style="color:#60a5fa">Open on ${v.source}</span>
+    </div>
+    <h4>File</h4>
+    <div class="kv">
+      <span>Filename</span><span>${v.file}</span>
+      <span>Size</span><span>${v.size}</span>
+      <span>Dimensions</span><span>${v.w} x ${v.h} (${v.w<v.h?'portrait':'landscape'})</span>
+      <span>Duration</span><span>${v.dur}</span>
+      <span>Frame rate</span><span>${v.fps} fps</span>
+      <span>Codecs</span><span>${v.vc} / ${v.ac}</span>
+      <span>Has sound</span><span>${v.audio?'Yes':'No'}</span>
+      <span>Uploaded</span><span>${v.up}</span>
+      <span>Imported</span><span>${v.imp}</span>
+    </div>
+    <h4>You</h4>
+    <div class="kv">
+      <span>Your rating</span><span class="${r?sc(r):'zero'}">${r?(r>0?'Liked':'Disliked'):'Not rated'}</span>
+      <span>In collections</span><span>${[favs[idx]&&'Favorites', r>0&&'Liked'].filter(Boolean).join(', ')||'None'}</span>
+    </div>
+    <div class="sheetbtns"><button onclick="clearRating()">Clear rating</button><button onclick="closeSheets();openCollections()">Add to collection</button></div>`;
+  openSheet('details');
+}
+function clearRating() { if (ratings[idx]) { delete ratings[idx]; updateBadge(); toast('Rating cleared, removed from Liked'); } closeSheets(); }
+
+function openCollections() {
+  const r = ratings[idx];
+  const rows = [
+    ['Favorites','Your manual favorites', !!favs[idx], false],
+    ['Liked','Automatic, follows your likes', r>0, true],
+    ['Road trip','12 videos', false, false],
+    ['Car builds','31 videos', false, false],
+  ];
+  document.getElementById('collections').innerHTML = `<div class="grab"></div><h3>Save to collection</h3>` +
+    rows.map((c,i)=>`<label class="colrow"><span>${c[0]}<small>${c[1]}</small></span><input type="checkbox" ${c[2]?'checked':''} ${c[3]?'disabled':''} ${i===0?'onchange="toggleFav()"':''}></label>`).join('') +
+    `<div class="sheetbtns"><button>+ New collection</button></div>`;
+  openSheet('collections');
+}
+function openSheet(id) { document.getElementById('scrim').classList.add('show'); document.getElementById(id).classList.add('show'); }
+function closeSheets() { document.getElementById('scrim').classList.remove('show'); document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show')); }
+
+// Gestures
+let sx, sy, st, axis = null, dragging = false;
+screen.addEventListener('pointerdown', e => {
+  if (e.target.closest('button,.sheet,.scrim,.nav,label,.creator')) return;
+  dragging = true; axis = null; sx = e.clientX; sy = e.clientY; st = performance.now();
+  card.style.transition = '';
+});
+window.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - sx, dy = e.clientY - sy;
+  if (!axis && Math.hypot(dx,dy) > 10) axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  if (axis === 'x') {
+    card.style.transform = `translateX(${dx}px) rotate(${dx/18}deg)`;
+    const p = Math.min(1, Math.abs(dx) / (screen.clientWidth*0.3));
+    card.querySelector('.stamp.like').style.opacity = dx>0 ? p : 0;
+    card.querySelector('.stamp.nope').style.opacity = dx<0 ? p : 0;
+  } else if (axis === 'y') {
+    card.style.transform = `translateY(${dy*0.5}px)`;
+  }
+});
+window.addEventListener('pointerup', e => {
+  if (!dragging) return; dragging = false;
+  const dx = e.clientX - sx, dy = e.clientY - sy, dt = performance.now() - st;
+  if (!axis) { togglePause(); return; }
+  if (axis === 'x') {
+    const fast = Math.abs(dx)/dt > 0.8 && Math.abs(dx) > 40;
+    if (Math.abs(dx) > screen.clientWidth*0.3 || fast) commitRate(dx>0?1:-1); else spring();
+  } else {
+    if (dy < -80) go(1); else if (dy > 80) go(-1); else spring();
+  }
+});
+window.addEventListener('keydown', e => {
+  if (e.key==='ArrowRight') commitRate(1);
+  else if (e.key==='ArrowLeft') commitRate(-1);
+  else if (e.key==='ArrowDown') go(1);
+  else if (e.key==='ArrowUp') go(-1);
+  else if (e.key===' ') { e.preventDefault(); togglePause(); }
+  else if (e.key==='f' || e.key==='F') toggleFav();
+  else if (e.key==='i' || e.key==='I') openDetails();
+  else if (e.key==='Escape') closeSheets();
+});
+window.addEventListener('resize', () => render(0));
+render(0);
+</script>
+</body>
+</html>

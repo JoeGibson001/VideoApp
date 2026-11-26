@@ -1,0 +1,27 @@
+# Secrets and runtime data
+.env
+data/
+**/cookies.txt
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+app/frontend/dev-dist/
+test-results/
+playwright-report/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
