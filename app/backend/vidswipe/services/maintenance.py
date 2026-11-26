@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, select, text
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -310,3 +310,59 @@ def reread_metadata(db: Session, video: Video) -> dict:
     db.commit()
     search_index.invalidate()
     return {"video_id": video.id, "status": "ok"}
+
+
+# ---- wipe everything (testing / fresh start) ------------------------------------------------------
+
+# Deleted children first so foreign keys are never violated.
+_CONTENT_TABLES = (
+    "collection_videos", "category_items", "ratings", "user_tag_stats", "user_creator_stats", "user_source_stats",
+    "video_tags", "watch_links", "source_tags", "videos", "creator_aliases", "creators", "tag_aliases",
+    "tag_duplicate_dismissals", "merge_log", "tags", "sources",
+)
+
+
+def wipe_all_content(db: Session, include_user_data: bool = False) -> dict:
+    """Delete every video, creator, source and tag plus all media files.
+
+    Kept: users and their logins, Favorites and Liked (emptied). With include_user_data, the
+    user's own collections, categories and recent searches are deleted too; otherwise they stay,
+    empty. IDs are not reset, so stale client state can never point at new rows.
+    """
+    counts = {t: db.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar() for t in
+              ("videos", "creators", "sources", "tags", "ratings")}
+    for t in _CONTENT_TABLES:
+        db.execute(text(f"DELETE FROM {t}"))
+    if include_user_data:
+        db.execute(text("DELETE FROM collections WHERE system_type IS NULL"))
+        db.execute(text("DELETE FROM categories"))
+        db.execute(text("DELETE FROM search_history"))
+    db.commit()
+    files = _wipe_media()
+    search_index.invalidate()
+    return {**{f"{k}_deleted": v for k, v in counts.items()}, **files,
+            "user_data_deleted": include_user_data}
+
+
+def _wipe_media() -> dict:
+    """Empty videos/, posters/, avatars/, metadata/ and icons/, keeping those folders."""
+    import shutil
+
+    base = get_settings().media_dir.resolve()
+    files = folders = 0
+    for root in (*MEDIA_ROOTS, "icons"):
+        d = base / root
+        if not d.is_dir() or d.is_symlink():
+            continue
+        for child in d.iterdir():
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    files += sum(1 for p in child.rglob("*") if p.is_file())
+                    shutil.rmtree(child)
+                    folders += 1
+                else:
+                    child.unlink()
+                    files += 1
+            except OSError as exc:  # pragma: no cover
+                log.warning("could not remove %s: %s", child, exc)
+    return {"files_deleted": files, "folders_removed": folders}

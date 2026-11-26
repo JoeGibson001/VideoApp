@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -820,6 +820,51 @@ def cleanup(body: CleanupIn | None = None, db: Session = Depends(get_db)):
     """Delete tags, creators and sources that have no videos."""
     types = set(body.types if body else ["tag", "creator", "source"]) & {"tag", "creator", "source"}
     return maintenance.cleanup_empty(db, types)
+
+
+WIPE_PHRASE = "DELETE ALL"
+
+
+class WipeIn(BaseModel):
+    confirm: str
+    include_user_data: bool = False  # also the user's own collections, categories, recent searches
+    clear_importer: bool = True  # cancel active imports, delete all watches and the import history
+
+
+@router.get("/wipe-all/preview")
+def wipe_preview(db: Session = Depends(get_db)):
+    q = lambda t: db.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()  # noqa: E731
+    return {"videos": q("videos"), "creators": q("creators"), "sources": q("sources"), "tags": q("tags"),
+            "ratings": q("ratings"), "collections": q("collections WHERE system_type IS NULL"),
+            "categories": q("categories"), "phrase": WIPE_PHRASE}
+
+
+@router.post("/wipe-all")
+def wipe_all(body: WipeIn, db: Session = Depends(get_db)):
+    """Delete all library content and media files (for testing). Requires confirm == "DELETE ALL"."""
+    if body.confirm.strip() != WIPE_PHRASE:
+        raise HTTPException(400, f'Type "{WIPE_PHRASE}" to confirm')
+    importer: dict = {"cleared": False}
+    if body.clear_importer:
+        # Stop queued/running imports first so nothing is ingested after the wipe.
+        try:
+            cancelled = 0
+            for status in ("queued", "running"):
+                jobs = importer_client.request("GET", "/api/imports", params={"status": status, "limit": 1000}) or []
+                for j in jobs if isinstance(jobs, list) else jobs.get("items", []):
+                    importer_client.request("DELETE", f"/api/imports/{j['id']}", allow=(404, 409), timeout=30)
+                    cancelled += 1
+            watches = importer_client.all_watches() or []
+            for w in watches:
+                importer_client.request("DELETE", f"/api/watches/{w['id']}", allow=(404,))
+            hist = importer_client.request("POST", "/api/imports/clear", json={}) or {}
+            importer = {"cleared": True, "jobs_cancelled": cancelled, "watches_deleted": len(watches),
+                        "history_deleted": hist.get("deleted", 0)}
+        except HTTPException as exc:
+            importer = {"cleared": False, "error": str(exc.detail)}
+        importer_client.invalidate_watch_cache()
+    res = maintenance.wipe_all_content(db, body.include_user_data)
+    return {**res, "importer": importer}
 
 
 @router.post("/recompute-stats")

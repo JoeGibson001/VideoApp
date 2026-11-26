@@ -213,3 +213,82 @@ def test_prune_never_escapes_media_root(env):
     top = env["media"] / "videos"
     top.mkdir(exist_ok=True)
     assert prune_empty_dirs(top) == 0 and top.exists()
+
+
+def test_wipe_all_content(admin, env, db):
+    files = media_files(env, "yt1")
+    _touch(env, "icons/youtube.com-1.png")
+    a = ingest(admin, vid="yt1", tags=["cats"])
+    ingest(admin, domain="vimeo.com", tags=["dogs"])
+    admin.put(f"/api/videos/{a}/rating", json={"value": 1})
+    admin.put(f"/api/videos/{a}/favorite")
+    mine = admin.post("/api/collections", json={"name": "mine"}).json()["id"]
+    admin.post(f"/api/collections/{mine}/videos", json={"video_id": a})
+    cat = admin.post("/api/categories", json={"name": "c"}).json()["id"]
+    admin.post(f"/api/categories/{cat}/items", json={"item_type": "tag", "item_id": tag_id(admin, "cats")})
+    admin.post("/api/search/recent", json={"q": "cats"})
+
+    prev = admin.get("/api/admin/wipe-all/preview").json()
+    assert prev["videos"] == 2 and prev["phrase"] == "DELETE ALL"
+    assert admin.post("/api/admin/wipe-all", json={"confirm": "delete"}).status_code == 400
+    assert count(db, "videos") == 2  # nothing happened
+
+    # importer is unreachable in tests: the wipe still runs and reports it
+    r = admin.post("/api/admin/wipe-all", json={"confirm": "DELETE ALL"}).json()
+    assert r["videos_deleted"] == 2 and r["files_deleted"] >= 4 and r["importer"]["cleared"] is False
+    for t in ("videos", "creators", "sources", "tags", "ratings", "video_tags", "user_tag_stats"):
+        assert count(db, t) == 0, t
+    assert not any(f.exists() for f in files)
+    for root in ("videos", "posters", "metadata", "icons"):
+        assert (env["media"] / root).is_dir() and not any((env["media"] / root).iterdir())
+    # user data kept (empty) by default; the admin can still log in
+    cols = {c["name"]: c for c in admin.get("/api/collections").json()["items"]}
+    assert set(cols) == {"Favorites", "Liked", "mine"} and all(c["video_count"] == 0 for c in cols.values())
+    assert admin.get(f"/api/categories/{cat}").json()["item_count"] == 0
+    assert admin.get("/api/feed").json()["items"] == []
+    assert admin.get("/api/search", params={"q": "cats"}).json()["groups"]["tag"]["items"] == []
+    # the library works again afterwards
+    b = ingest(admin, tags=["fresh"])
+    assert admin.get("/api/feed").json()["items"][0]["id"] == b and b > a
+
+    r = admin.post("/api/admin/wipe-all", json={"confirm": "DELETE ALL", "include_user_data": True,
+                                                "clear_importer": False}).json()
+    assert r["user_data_deleted"] and "error" not in r["importer"]
+    assert {c["name"] for c in admin.get("/api/collections").json()["items"]} == {"Favorites", "Liked"}
+    assert admin.get("/api/categories").json()["items"] == [] and admin.get("/api/search/recent").json()["items"] == []
+
+
+def test_wipe_clears_importer(admin, monkeypatch):
+    from vidswipe.services import importer_client
+
+    calls = []
+
+    def fake(method, path, allow=(), params=None, json=None, **_):
+        calls.append((method, path))
+        if path == "/api/imports":
+            return [{"id": 7}] if params["status"] == "queued" else []
+        if path == "/api/watches":
+            return [{"id": 3}, {"id": 4}]
+        if path == "/api/imports/clear":
+            return {"deleted": 12}
+        return {}
+
+    monkeypatch.setattr(importer_client, "request", fake)
+    importer_client.invalidate_watch_cache()
+    r = admin.post("/api/admin/wipe-all", json={"confirm": "DELETE ALL"}).json()
+    assert r["importer"] == {"cleared": True, "jobs_cancelled": 1, "watches_deleted": 2, "history_deleted": 12}
+    assert ("DELETE", "/api/imports/7") in calls and ("DELETE", "/api/watches/4") in calls
+    # active imports are cancelled before history is cleared
+    assert calls.index(("DELETE", "/api/imports/7")) < calls.index(("POST", "/api/imports/clear"))
+
+
+def test_wipe_admin_only(client):
+    from .conftest import login
+    from vidswipe.db import new_session
+    from vidswipe.services.users import create_user
+
+    s = new_session()
+    create_user(s, "bob", "bobpass")
+    s.close()
+    login(client, "bob", "bobpass")
+    assert client.post("/api/admin/wipe-all", json={"confirm": "DELETE ALL"}).status_code == 403

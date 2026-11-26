@@ -67,6 +67,7 @@ export default function Maintenance() {
           </div>
         )
       })}
+      <WipeCard />
     </div>
   )
 }
@@ -141,6 +142,89 @@ function CleanupCard() {
               {total ? `Delete ${total} empty item${total === 1 ? '' : 's'}` : 'Nothing to clean up'}
             </button>
           </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+
+interface WipePreview { videos: number; creators: number; sources: number; tags: number; ratings: number; collections: number; categories: number; phrase: string }
+interface WipeResult {
+  videos_deleted: number; creators_deleted: number; sources_deleted: number; tags_deleted: number; files_deleted: number
+  importer: { cleared: boolean; error?: string; jobs_cancelled?: number; watches_deleted?: number; history_deleted?: number }
+}
+
+/** Delete all library content and media files, for testing. Needs the phrase typed in. */
+function WipeCard() {
+  const [open, setOpen] = useState(false)
+  const [preview, setPreview] = useState<WipePreview | null>(null)
+  const [typed, setTyped] = useState('')
+  const [userData, setUserData] = useState(false)
+  const [importer, setImporter] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState<WipeResult | null>(null)
+
+  const start = async () => {
+    setError(''); setDone(null); setTyped('')
+    try { setPreview(await get<WipePreview>('/api/admin/wipe-all/preview')); setOpen(true) } catch (e) { setError(errText(e)) }
+  }
+  const run = async () => {
+    setBusy(true); setError('')
+    try {
+      const r = await post<WipeResult>('/api/admin/wipe-all', { confirm: typed, include_user_data: userData, clear_importer: importer })
+      setDone(r); setOpen(false); setPreview(null)
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+  const phrase = preview?.phrase || 'DELETE ALL'
+
+  return (
+    <div className="card danger-zone">
+      <div className="rowline">
+        <div style={{ flex: 1 }}>
+          <b>Delete all content</b>
+          <div className="muted" style={{ fontSize: 13 }}>
+            For testing: deletes every video, creator, source and tag, all ratings and every media file. Users and logins are kept.
+          </div>
+        </div>
+        {!open ? <button className="btn danger" disabled={busy} onClick={() => void start()}>Delete all...</button> : null}
+      </div>
+      {open && preview ? (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ margin: '0 0 8px' }}>
+            This permanently deletes <b>{preview.videos}</b> videos, <b>{preview.creators}</b> creators, <b>{preview.sources}</b> sources,
+            {' '}<b>{preview.tags}</b> tags and <b>{preview.ratings}</b> ratings, plus all files in the media folder. It cannot be undone.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={importer} onChange={(e) => setImporter(e.target.checked)} />
+            Also cancel running imports, delete all watches and clear the import history
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={userData} onChange={(e) => setUserData(e.target.checked)} />
+            Also delete my {preview.collections} collection{preview.collections === 1 ? '' : 's'}, {preview.categories} categor{preview.categories === 1 ? 'y' : 'ies'} and recent searches
+            (Favorites and Liked are always kept, empty)
+          </label>
+          <label className="field">Type <b>{phrase}</b> to confirm
+            <input type="text" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} aria-label="Type the phrase to confirm" />
+          </label>
+          <div className="btnrow">
+            <button className="btn" disabled={busy} onClick={() => { setOpen(false); setPreview(null) }}>Cancel</button>
+            <button className="btn danger" disabled={busy || typed.trim() !== phrase} onClick={() => void run()}>
+              {busy ? 'Deleting...' : 'Delete everything'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {busy ? <Spinner /> : null}
+      {error ? <div className="error">{error}</div> : null}
+      {done ? (
+        <div className="notice">
+          Deleted {done.videos_deleted} videos, {done.creators_deleted} creators, {done.sources_deleted} sources, {done.tags_deleted} tags
+          and {done.files_deleted} files.
+          {done.importer.cleared
+            ? ` Importer: ${done.importer.jobs_cancelled} import(s) cancelled, ${done.importer.watches_deleted} watch(es) deleted, ${done.importer.history_deleted} history item(s) cleared.`
+            : done.importer.error ? ` Importer was not cleared: ${done.importer.error}` : ''}
         </div>
       ) : null}
     </div>
