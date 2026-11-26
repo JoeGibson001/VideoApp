@@ -29,14 +29,17 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    # True: sees every source, including ones added later. False: only the sources in user_sources.
-    all_sources: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Which sources the user sees (user_sources holds the list for "only" and "except"):
+    #   all    - every source, including ones added later
+    #   only   - just the listed sources
+    #   except - every source, including ones added later, apart from the listed ones
+    source_mode: Mapped[str] = mapped_column(String(8), default="all")
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class UserSource(Base):
-    """Sources a user may see when User.all_sources is False."""
+    """The user's source list: shown sources for source_mode "only", hidden ones for "except"."""
 
     __tablename__ = "user_sources"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

@@ -17,22 +17,47 @@ Allowed = frozenset[int] | None
 ANON_KEY = "anonymous_sources"
 
 
+MODES = ("all", "only", "except")
+
+
+def resolve(db: Session, mode: str, ids) -> Allowed:
+    """Turn a mode + list into the allowed set. "except" is worked out now, so new sources show up."""
+    if mode == "only":
+        return frozenset(int(i) for i in ids)
+    if mode == "except":
+        hidden = {int(i) for i in ids}
+        if not hidden:
+            return None
+        return frozenset(i for i in db.scalars(select(Source.id)) if i not in hidden)
+    return None
+
+
 def user_allowed(db: Session, user: User) -> Allowed:
-    if user.all_sources:
+    if user.source_mode not in ("only", "except"):
         return None
-    return frozenset(db.scalars(select(UserSource.source_id).where(UserSource.user_id == user.id)))
+    ids = db.scalars(select(UserSource.source_id).where(UserSource.user_id == user.id))
+    return resolve(db, user.source_mode, ids)
+
+
+def access_dict(mode: str, ids) -> dict:
+    """API shape for a user's or visitors' access. all_sources is kept for older clients."""
+    return {"source_mode": mode, "source_ids": sorted(int(i) for i in ids) if mode != "all" else [],
+            "all_sources": mode == "all"}
 
 
 def anonymous_setting(db: Session) -> dict:
     row = db.get(AppSetting, ANON_KEY)
     value = (row.value if row else None) or {}
-    # Default (no setting saved yet): visitors see nothing until an admin chooses sources for them.
-    return {"all_sources": bool(value.get("all_sources", False)), "source_ids": list(value.get("source_ids", []))}
+    mode = value.get("mode")
+    if mode not in MODES:  # older shape {"all_sources": bool}
+        mode = "all" if value.get("all_sources") else "only"
+    # Default (no setting saved yet): "only" with nothing listed, i.e. visitors see nothing.
+    return access_dict(mode, value.get("source_ids", []))
 
 
 def anonymous_allowed(db: Session) -> Allowed:
     s = anonymous_setting(db)
-    return None if s["all_sources"] else frozenset(int(i) for i in s["source_ids"])
+    return resolve(db, s["source_mode"], s["source_ids"])
 
 
 def allowed_for(db: Session, user: User | None) -> Allowed:

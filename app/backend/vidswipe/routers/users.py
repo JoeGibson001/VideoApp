@@ -1,4 +1,6 @@
 """Admin: local users and source access (who can see which sources)."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
@@ -28,7 +30,7 @@ def _user_dict(db: Session, u: User, me: User | None = None) -> dict:
     sources = sorted(db.scalars(select(UserSource.source_id).where(UserSource.user_id == u.id)))
     return {
         "id": u.id, "username": u.username, "is_admin": u.is_admin, "is_active": u.is_active,
-        "all_sources": u.all_sources, "source_ids": sources,
+        **visibility.access_dict(u.source_mode, sources),
         "created_at": u.created_at.isoformat() + "Z" if u.created_at else None,
         "ratings": db.scalar(select(func.count()).select_from(Rating).where(Rating.user_id == u.id)),
         "is_me": bool(me and me.id == u.id),
@@ -42,10 +44,22 @@ def _active_admins(db: Session, exclude: int | None = None) -> int:
     return db.scalar(q)
 
 
-def _set_sources(db: Session, u: User, all_sources: bool, source_ids: list[int] | None) -> None:
-    u.all_sources = all_sources
+SourceMode = Literal["all", "only", "except"]
+
+
+def _mode(source_mode: str | None, all_sources: bool | None, current: str) -> str:
+    """source_mode wins; the older all_sources flag maps to all / only."""
+    if source_mode:
+        return source_mode
+    if all_sources is not None:
+        return "all" if all_sources else "only"
+    return current
+
+
+def _set_sources(db: Session, u: User, mode: str, source_ids: list[int] | None) -> None:
+    u.source_mode = mode
     db.execute(delete(UserSource).where(UserSource.user_id == u.id))
-    if not all_sources:
+    if mode != "all":
         for sid in _source_ids(db, source_ids):
             db.add(UserSource(user_id=u.id, source_id=sid))
 
@@ -62,7 +76,8 @@ class UserIn(BaseModel):
     username: str
     password: str
     is_admin: bool = False
-    all_sources: bool = True
+    source_mode: SourceMode | None = None
+    all_sources: bool | None = None  # older clients
     source_ids: list[int] = []
 
 
@@ -72,8 +87,9 @@ def add_user(body: UserIn, me: User = Depends(require_admin), db: Session = Depe
     validate_password(body.password)
     if db.scalar(select(User).where(func.lower(User.username) == name.lower())):
         raise HTTPException(409, f"The username '{name}' is taken")
-    ids = [] if body.all_sources else _source_ids(db, body.source_ids)
-    u = create_user(db, name, body.password, is_admin=body.is_admin, all_sources=body.all_sources, source_ids=ids)
+    mode = _mode(body.source_mode, body.all_sources, "all")
+    ids = [] if mode == "all" else _source_ids(db, body.source_ids)
+    u = create_user(db, name, body.password, is_admin=body.is_admin, source_mode=mode, source_ids=ids)
     return _user_dict(db, u, me)
 
 
@@ -82,7 +98,8 @@ class UserPatch(BaseModel):
     password: str | None = None
     is_admin: bool | None = None
     is_active: bool | None = None
-    all_sources: bool | None = None
+    source_mode: SourceMode | None = None
+    all_sources: bool | None = None  # older clients
     source_ids: list[int] | None = None
 
 
@@ -116,11 +133,11 @@ def edit_user(user_id: int, body: UserPatch, me: User = Depends(require_admin), 
         u.password_hash = hash_password(body.password)
         if not is_me:  # an admin reset logs the user out on every device
             db.execute(delete(UserSession).where(UserSession.user_id == u.id))
-    if body.all_sources is not None or body.source_ids is not None:
-        all_sources = u.all_sources if body.all_sources is None else body.all_sources
+    if body.source_mode is not None or body.all_sources is not None or body.source_ids is not None:
+        mode = _mode(body.source_mode, body.all_sources, u.source_mode)
         ids = body.source_ids if body.source_ids is not None else list(
             db.scalars(select(UserSource.source_id).where(UserSource.user_id == u.id)))
-        _set_sources(db, u, all_sources, ids)
+        _set_sources(db, u, mode, ids)
     db.commit()
     return _user_dict(db, u, me)
 
@@ -148,15 +165,19 @@ def get_anonymous_access(db: Session = Depends(get_db)):
 
 
 class AccessIn(BaseModel):
-    all_sources: bool
+    source_mode: SourceMode | None = None
+    all_sources: bool | None = None  # older clients
     source_ids: list[int] = []
 
 
 @router.put("/visibility/anonymous")
 def set_anonymous_access(body: AccessIn, db: Session = Depends(get_db)):
-    ids = [] if body.all_sources else _source_ids(db, body.source_ids)
+    if body.source_mode is None and body.all_sources is None:
+        raise HTTPException(422, "source_mode is required")
+    mode = _mode(body.source_mode, body.all_sources, "only")
+    ids = [] if mode == "all" else _source_ids(db, body.source_ids)
     row = db.get(AppSetting, visibility.ANON_KEY)
-    value = {"all_sources": body.all_sources, "source_ids": ids}
+    value = {"mode": mode, "source_ids": ids}
     if row is None:
         db.add(AppSetting(key=visibility.ANON_KEY, value=value))
     else:

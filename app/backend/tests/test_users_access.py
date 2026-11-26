@@ -174,7 +174,8 @@ def test_admin_can_hide_sources_from_self(admin, env):
 def test_anonymous_access(admin, env):
     yt, vm, yt_src, vm_src = _setup(admin, env)
     anon = _new_client(admin)
-    assert admin.get("/api/admin/visibility/anonymous").json() == {"all_sources": False, "source_ids": []}
+    assert admin.get("/api/admin/visibility/anonymous").json() == {"source_mode": "only", "all_sources": False,
+                                                                   "source_ids": []}
     r = anon.get("/api/feed").json()  # default: visitors see nothing and are asked to log in
     assert r["items"] == [] and r["login_required"] is True
     assert anon.get(f"/api/videos/{yt}").status_code == 404 and anon.get("/api/tags").json()["items"] == []
@@ -214,3 +215,44 @@ def test_seed_does_not_recreate_deleted_admin(admin):
     assert "admin" not in [u["username"] for u in boss.get("/api/admin/users").json()["items"]]
     c = _new_client(admin)
     assert c.post("/api/auth/login", json={"username": "admin", "password": ADMIN_PW}).status_code == 401
+
+
+def test_all_except_mode(admin, env):
+    yt, vm, yt_src, vm_src = _setup(admin, env)
+    u = admin.post("/api/admin/users", json={"username": "jill", "password": "longenough", "source_mode": "except",
+                                             "source_ids": [vm_src]}).json()
+    assert u["source_mode"] == "except" and u["source_ids"] == [vm_src] and u["all_sources"] is False
+    jill = _as(admin, "jill", "longenough")
+    assert [v["id"] for v in jill.get("/api/feed").json()["items"]] == [yt]
+    assert jill.get(f"/api/videos/{vm}").status_code == 404
+    assert {t["name"] for t in jill.get("/api/tags").json()["items"]} == {"cats", "shared"}
+    assert jill.get("/media/videos/vimeo.com/v1.mp4").status_code == 404
+    # a brand new source shows up automatically (unlike "only")
+    new = ingest(admin, domain="tiktok.com", creator="tk", tags=["new"])
+    assert set(v["id"] for v in jill.get("/api/feed").json()["items"]) == {yt, new}
+    assert "tiktok.com" in [s["domain"] for s in jill.get("/api/sources").json()["items"]]
+    # nothing excluded = everything
+    admin.patch(f"/api/admin/users/{u['id']}", json={"source_ids": []})
+    assert len(jill.get("/api/feed").json()["items"]) == 3
+    # switching modes keeps the list semantics clear: "only" with the same list shows just that
+    r = admin.patch(f"/api/admin/users/{u['id']}", json={"source_mode": "only", "source_ids": [vm_src]}).json()
+    assert r["source_mode"] == "only"
+    assert [v["id"] for v in jill.get("/api/feed").json()["items"]] == [vm]
+    # "all" clears the list
+    r = admin.patch(f"/api/admin/users/{u['id']}", json={"source_mode": "all"}).json()
+    assert r["source_mode"] == "all" and r["source_ids"] == []
+    assert admin.post("/api/admin/users", json={"username": "kim", "password": "longenough",
+                                                "source_mode": "bogus"}).status_code == 422
+
+
+def test_visitors_all_except(admin, env):
+    yt, vm, yt_src, vm_src = _setup(admin, env)
+    anon = _new_client(admin)
+    r = admin.put("/api/admin/visibility/anonymous", json={"source_mode": "except", "source_ids": [yt_src]}).json()
+    assert r == {"source_mode": "except", "source_ids": [yt_src], "all_sources": False}
+    assert [v["id"] for v in anon.get("/api/feed").json()["items"]] == [vm]
+    new = ingest(admin, domain="tiktok.com", creator="tk", tags=["new"])
+    assert set(v["id"] for v in anon.get("/api/feed").json()["items"]) == {vm, new}
+    assert anon.get("/api/feed").json()["login_required"] is False
+    # the older request shape still works
+    assert admin.put("/api/admin/visibility/anonymous", json={"all_sources": True}).json()["source_mode"] == "all"

@@ -53,7 +53,7 @@ export async function setVisitorAccess(ctx: APIRequestContext, all: boolean) {
   if (!login.ok()) throw new Error(`admin login failed: ${login.status()}`)
   const csrf = (await ctx.storageState()).cookies.find((c) => c.name === 'vs_csrf')?.value || ''
   const r = await ctx.put('/api/admin/visibility/anonymous', {
-    headers: { 'X-CSRF-Token': csrf }, data: { all_sources: all, source_ids: [] },
+    headers: { 'X-CSRF-Token': csrf }, data: { source_mode: all ? 'all' : 'only', source_ids: [] },
   })
   if (!r.ok()) throw new Error(`visitor access failed: ${r.status()} ${await r.text()}`)
 }

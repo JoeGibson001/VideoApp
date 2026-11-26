@@ -5,41 +5,61 @@ import { useAuth, useToast } from '../state'
 import { ErrorBox, useAction, useLoad } from './shared'
 
 interface SourceOption { id: number; name: string; domain: string; video_count: number; icon_url: string | null }
-interface Access { all_sources: boolean; source_ids: number[] }
+type SourceMode = 'all' | 'only' | 'except'
+interface Access { source_mode: SourceMode; source_ids: number[] }
 interface AdminUser extends Access {
   id: number; username: string; is_admin: boolean; is_active: boolean; created_at: string | null; ratings: number; is_me: boolean
 }
 
 function accessLabel(a: Access, total: number): string {
-  if (a.all_sources) return 'All sources (including new ones)'
-  if (!a.source_ids.length) return 'No sources'
-  return `${a.source_ids.length} of ${total} source${total === 1 ? '' : 's'}`
+  const n = a.source_ids.length
+  if (a.source_mode === 'all') return 'All sources (including new ones)'
+  if (a.source_mode === 'except') return n ? `All sources except ${n} (new ones included)` : 'All sources (including new ones)'
+  if (!n) return 'No sources'
+  return `${n} of ${total} source${total === 1 ? '' : 's'}`
 }
 
-/** "All sources, including ones added later" or a hand-picked list. */
+const MODE_TEXT: Record<SourceMode, { label: string; list?: string; hint?: string }> = {
+  all: { label: 'All sources, including ones added later' },
+  except: {
+    label: 'All sources, including ones added later, except the ones ticked below',
+    list: 'Hide these sources', hint: 'New sources are shown automatically.',
+  },
+  only: {
+    label: 'Only the sources ticked below',
+    list: 'Show these sources', hint: 'New sources stay hidden until they are ticked here.',
+  },
+}
+
+/** All sources / all except a list / only a list. */
 function SourceAccess({ value, onChange, sources, name }: {
   value: Access; onChange: (a: Access) => void; sources: SourceOption[]; name: string
 }) {
   const toggle = (id: number, on: boolean) => onChange({
     ...value, source_ids: on ? [...value.source_ids, id] : value.source_ids.filter((x) => x !== id),
   })
+  // The list means "show" for one mode and "hide" for the other, so switching between them starts afresh.
+  const setMode = (m: SourceMode) => onChange({ source_mode: m, source_ids: m === value.source_mode ? value.source_ids : [] })
+  const text = MODE_TEXT[value.source_mode]
   return (
     <div>
-      <label className="check">
-        <input type="radio" name={`${name}-mode`} checked={value.all_sources} onChange={() => onChange({ ...value, all_sources: true })} />
-        All sources, including ones added later
-      </label>
-      <label className="check">
-        <input type="radio" name={`${name}-mode`} checked={!value.all_sources} onChange={() => onChange({ ...value, all_sources: false })} />
-        Only the sources ticked below
-      </label>
-      {!value.all_sources ? (
+      {(['all', 'except', 'only'] as SourceMode[]).map((m) => (
+        <label key={m} className="check">
+          <input type="radio" name={`${name}-mode`} checked={value.source_mode === m} onChange={() => setMode(m)} />
+          {MODE_TEXT[m].label}
+        </label>
+      ))}
+      {value.source_mode !== 'all' ? (
         <div style={{ paddingLeft: 30 }}>
+          <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{text.list}</div>
           {!sources.length ? <div className="muted" style={{ fontSize: 13 }}>No sources yet</div> : sources.map((s) => (
             <label key={s.id} className="check">
-              <input type="checkbox" checked={value.source_ids.includes(s.id)} onChange={(e) => toggle(s.id, e.target.checked)} />
+              <input type="checkbox" checked={value.source_ids.includes(s.id)} onChange={(e) => toggle(s.id, e.target.checked)}
+                aria-label={`${value.source_mode === 'except' ? 'Hide' : 'Show'} ${s.name}`} />
               <Avatar name={s.name} url={s.icon_url} size={22} square />
-              <span>{s.name} <span className="muted" style={{ fontSize: 12 }}>{s.domain} - {s.video_count} video{s.video_count === 1 ? '' : 's'}</span></span>
+              <span style={value.source_mode === 'except' && value.source_ids.includes(s.id) ? { textDecoration: 'line-through', opacity: 0.6 } : undefined}>
+                {s.name} <span className="muted" style={{ fontSize: 12 }}>{s.domain} - {s.video_count} video{s.video_count === 1 ? '' : 's'}</span>
+              </span>
             </label>
           ))}
           {sources.length ? (
@@ -48,7 +68,7 @@ function SourceAccess({ value, onChange, sources, name }: {
               <button className="btn small" type="button" style={{ flex: 'none' }} onClick={() => onChange({ ...value, source_ids: [] })}>Untick all</button>
             </div>
           ) : null}
-          <div className="muted" style={{ fontSize: 12 }}>Sources added later stay hidden until they are ticked here.</div>
+          <div className="muted" style={{ fontSize: 12 }}>{text.hint}</div>
         </div>
       ) : null}
     </div>
@@ -96,7 +116,8 @@ function VisitorsCard({ sources }: { sources: SourceOption[] }) {
   const [value, setValue] = useState<Access | null>(null)
   const act = useAction()
   useEffect(() => { if (setting.data) setValue(setting.data) }, [setting.data])
-  const dirty = value && setting.data && JSON.stringify(value) !== JSON.stringify(setting.data)
+  const key = (a: Access) => `${a.source_mode}:${[...a.source_ids].sort((x, y) => x - y).join(',')}`
+  const dirty = !!value && !!setting.data && key(value) !== key(setting.data)
   const save = async () => {
     if (!value) return
     const r = await act.run(() => put<Access>('/api/admin/visibility/anonymous', value), 'Visitor access saved')
@@ -123,13 +144,13 @@ function AddUserCard({ sources, onAdded }: { sources: SourceOption[]; onAdded: (
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-  const [access, setAccess] = useState<Access>({ all_sources: true, source_ids: [] })
+  const [access, setAccess] = useState<Access>({ source_mode: 'all', source_ids: [] })
   const act = useAction()
   const add = async () => {
     const r = await act.run(() => post<AdminUser>('/api/admin/users', { username, password, is_admin: isAdmin, ...access }),
       `Created ${isAdmin ? 'admin' : 'user'} ${username}`)
     if (r) {
-      setUsername(''); setPassword(''); setIsAdmin(false); setAccess({ all_sources: true, source_ids: [] }); setOpen(false)
+      setUsername(''); setPassword(''); setIsAdmin(false); setAccess({ source_mode: 'all', source_ids: [] }); setOpen(false)
       onAdded()
     }
   }
@@ -168,7 +189,7 @@ function EditUser({ user, sources, onSaved, onDeleted }: {
   const [username, setUsername] = useState(user.username)
   const [isAdmin, setIsAdmin] = useState(user.is_admin)
   const [isActive, setIsActive] = useState(user.is_active)
-  const [access, setAccess] = useState<Access>({ all_sources: user.all_sources, source_ids: user.source_ids })
+  const [access, setAccess] = useState<Access>({ source_mode: user.source_mode, source_ids: user.source_ids })
   const [password, setPassword] = useState('')
   const act = useAction()
 

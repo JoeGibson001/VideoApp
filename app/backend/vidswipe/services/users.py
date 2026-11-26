@@ -22,12 +22,12 @@ def ensure_system_collections(db: Session, user: User) -> None:
         db.add(Collection(user_id=user.id, name="Liked", system_type="liked"))
 
 
-def create_user(db: Session, username: str, password: str, is_admin: bool = False, all_sources: bool = True,
+def create_user(db: Session, username: str, password: str, is_admin: bool = False, source_mode: str = "all",
                 source_ids: list[int] | None = None) -> User:
     from ..models import UserSource
 
     user = User(username=username, password_hash=hash_password(password), is_admin=is_admin, is_active=True,
-                all_sources=all_sources, settings={})
+                source_mode=source_mode, settings={})
     db.add(user)
     db.flush()
     for sid in set(source_ids or []):
