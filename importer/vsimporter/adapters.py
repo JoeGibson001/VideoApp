@@ -367,7 +367,7 @@ class RealFetcher:
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self.client = client or httpx.AsyncClient(
-            timeout=30, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (VidSwipe importer)"}
+            timeout=30, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Tastebud importer)"}
         )
 
     async def fetch(self, url: str, dst: Path) -> bool:

@@ -1,4 +1,4 @@
-# VidSwipe: Design Document (working name)
+# Tastebud: Design Document (formerly the working name VidSwipe)
 
 Companion file: `mockup-player.html` is an interactive mockup of the video player. Open it in a browser and use it as the visual reference for the feed screen (layout, overlays, swipe behaviour, details sheet, save sheet).
 

@@ -49,7 +49,7 @@ def test_unconfigured_key_rejects(svc, settings):
 
 def test_index_page(client):
     r = client.get("/")
-    assert r.status_code == 200 and "VidSwipe Importer" in r.text
+    assert r.status_code == 200 and "Tastebud Importer" in r.text
 
 
 def test_import_lifecycle(client, svc, fakes):

@@ -18,13 +18,13 @@ services:
       - ./app/frontend/e2e/fixtures:/media/posters/e2e:ro
     networks:
       default:
-        aliases: [vidswipe.e2e.test]
+        aliases: [tastebud.e2e.test]
 
   e2e:
     image: mcr.microsoft.com/playwright:v1.49.1-jammy
     working_dir: /w
     environment:
-      E2E_BASE_URL: http://vidswipe.e2e.test:8080
+      E2E_BASE_URL: http://tastebud.e2e.test:8080
       E2E_INGEST_KEY: e2e-ingest
       E2E_ADMIN_PASSWORD: e2e-admin
       CI: "1"

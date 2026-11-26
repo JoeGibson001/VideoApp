@@ -12,8 +12,8 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'VidSwipe',
-        short_name: 'VidSwipe',
+        name: 'Tastebud',
+        short_name: 'Tastebud',
         description: 'Swipe to rate, scroll to discover.',
         start_url: '/',
         scope: '/',

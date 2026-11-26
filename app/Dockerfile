@@ -1,4 +1,4 @@
-# VidSwipe App: build the PWA, then serve it from the FastAPI backend.
+# Tastebud App: build the PWA, then serve it from the FastAPI backend.
 
 FROM node:22-alpine AS frontend
 WORKDIR /build

@@ -136,7 +136,7 @@ def create_app(svc: Importer, *, background: bool = True) -> FastAPI:
         finally:
             await svc.stop()
 
-    app = FastAPI(title="VidSwipe Importer", version=IMPORTER_VERSION, lifespan=lifespan)
+    app = FastAPI(title="Tastebud Importer", version=IMPORTER_VERSION, lifespan=lifespan)
     app.state.svc = svc
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)

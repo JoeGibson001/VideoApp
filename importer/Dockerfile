@@ -1,8 +1,8 @@
-# VidSwipe Importer: FastAPI + yt-dlp + ffmpeg.
+# Tastebud Importer: FastAPI + yt-dlp + ffmpeg.
 #
-#   docker build -t vidswipe-importer importer                      # runtime image (default target)
-#   docker build --target test -t vidswipe-importer-test importer   # test image
-#   docker run --rm vidswipe-importer-test                          # runs pytest
+#   docker build -t tastebud-importer importer                      # runtime image (default target)
+#   docker build --target test -t tastebud-importer-test importer   # test image
+#   docker run --rm tastebud-importer-test                          # runs pytest
 
 FROM python:3.12-slim AS base
 

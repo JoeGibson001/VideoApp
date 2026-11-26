@@ -1,4 +1,4 @@
-# VidSwipe Importer
+# Tastebud Importer
 
 Separate service that downloads videos with yt-dlp, normalises them with ffmpeg, writes them to the
 shared `/media` volume and hands the metadata to the App's internal ingest endpoint
@@ -207,8 +207,8 @@ Behaviour notes:
 ## Tests
 
 ```sh
-docker build --target test -t vidswipe-importer-test importer
-docker run --rm vidswipe-importer-test
+docker build --target test -t tastebud-importer-test importer
+docker run --rm tastebud-importer-test
 ```
 
 yt-dlp, ffmpeg, the App and HTTP downloads are replaced by fakes (`tests/conftest.py`), and the

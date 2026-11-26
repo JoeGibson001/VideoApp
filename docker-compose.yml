@@ -1,7 +1,7 @@
 services:
   app:
     build: ./app
-    image: vidswipe-app
+    image: tastebud-app
     restart: unless-stopped
     ports: ["8080:8080"]
     env_file: .env
@@ -20,7 +20,7 @@ services:
 
   importer:
     build: ./importer
-    image: vidswipe-importer
+    image: tastebud-importer
     restart: unless-stopped
     ports: ["8081:8081"]        # optional: only needed to call the Importer API from outside
     env_file: .env

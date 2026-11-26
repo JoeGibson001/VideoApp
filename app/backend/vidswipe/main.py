@@ -61,7 +61,7 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app(run_startup: bool = True) -> FastAPI:
-    app = FastAPI(title="VidSwipe", version=__version__, lifespan=lifespan if run_startup else None,
+    app = FastAPI(title="Tastebud", version=__version__, lifespan=lifespan if run_startup else None,
                   docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.include_router(auth.router)
     app.include_router(api.router)
@@ -95,7 +95,7 @@ def create_app(run_startup: bool = True) -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         def root():
-            return JSONResponse({"app": "VidSwipe", "note": "frontend build not found"})
+            return JSONResponse({"app": "Tastebud", "note": "frontend build not found"})
 
     return app
 

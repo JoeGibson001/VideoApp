@@ -1,4 +1,4 @@
-# VidSwipe
+# Tastebud
 
 A mobile-first, installable web app that combines a full screen vertical video feed with Tinder-style swipe rating. Likes and dislikes build per-user scores for tags, creators and sources, which drive a personalised feed. Videos come in through a separate Importer service built on yt-dlp.
 
@@ -44,7 +44,7 @@ Example nginx location:
 
 ```nginx
 location / {
-    proxy_pass http://vidswipe-app:8080;
+    proxy_pass http://tastebud-app:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -76,7 +76,7 @@ Back up `./data/app/app.db` (ratings, collections, categories, users) and `./dat
 
 ```sh
 # App backend (pytest)
-docker build -t vidswipe-app-test -f- app/backend <<'EOF'
+docker build -t tastebud-app-test -f- app/backend <<'EOF'
 FROM python:3.12-slim
 WORKDIR /src
 COPY requirements*.txt ./
@@ -84,10 +84,10 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
 CMD ["python", "-m", "pytest", "-q"]
 EOF
-docker run --rm vidswipe-app-test
+docker run --rm tastebud-app-test
 
 # Importer (pytest)
-docker build --target test -t vidswipe-importer-test importer && docker run --rm vidswipe-importer-test
+docker build --target test -t tastebud-importer-test importer && docker run --rm tastebud-importer-test
 
 # Mobile E2E (Playwright, iPhone + Pixel emulation)
 docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e

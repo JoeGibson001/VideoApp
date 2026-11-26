@@ -1,1 +1,1 @@
-"""VidSwipe Importer service."""
+"""Tastebud Importer service."""

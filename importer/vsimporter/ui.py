@@ -5,7 +5,7 @@ INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VidSwipe Importer</title>
+<title>Tastebud Importer</title>
 <style>
 :root { color-scheme: light dark; --bg:#fff; --fg:#111; --mut:#666; --line:#ddd; --acc:#2563eb; }
 @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --mut:#999; --line:#333; --acc:#60a5fa; } }
@@ -21,7 +21,7 @@ td, th { border-bottom:1px solid var(--line); padding:6px 4px; text-align:left; 
 </style>
 </head>
 <body>
-<h1>VidSwipe Importer</h1>
+<h1>Tastebud Importer</h1>
 <form id="f">
   <input id="url" type="url" placeholder="Video, playlist or profile URL" required>
   <input id="tags" placeholder="extra tags, comma separated">
