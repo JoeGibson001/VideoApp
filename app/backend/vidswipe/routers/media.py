@@ -4,10 +4,14 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..db import get_db
+from ..security import Auth, get_auth
+from ..services import visibility
 
 router = APIRouter()
 
@@ -43,15 +47,33 @@ def _iter_file(path: Path, start: int, length: int):
             yield data
 
 
+PER_SOURCE_ROOTS = {"videos", "posters", "avatars"}  # laid out as <root>/<source domain>/...
+
+
+def _check_access(rel: str, auth: Auth, db: Session) -> None:
+    """Files of a source the viewer may not see are reported as missing."""
+    parts = rel.split("/")
+    if parts[0] not in PER_SOURCE_ROOTS or len(parts) < 3:
+        return
+    allowed = visibility.allowed_for(db, auth.user)
+    if allowed is None:
+        return
+    sid = visibility.source_id_for_domain(db, parts[1])
+    if not visibility.can_see_source(allowed, sid):
+        raise HTTPException(404)
+
+
 @router.api_route("/media/{rel:path}", methods=["GET", "HEAD"])
-def serve_media(rel: str, request: Request):
+def serve_media(rel: str, request: Request, auth: Auth = Depends(get_auth), db: Session = Depends(get_db)):
     path = safe_media_path(rel)
+    _check_access(rel, auth, db)
     size = path.stat().st_size
     ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     mtime = int(path.stat().st_mtime)
     headers = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=86400" if not rel.startswith("avatars/") else "public, max-age=3600",
+        # private: access depends on who is asking, so shared caches must not keep a copy
+        "Cache-Control": "private, max-age=86400" if not rel.startswith("avatars/") else "private, max-age=3600",
         "ETag": f'"{mtime:x}-{size:x}"',
     }
     rng = request.headers.get("range")

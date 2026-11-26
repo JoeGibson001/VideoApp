@@ -8,12 +8,13 @@ import Maintenance from './Maintenance'
 import Merges from './Merges'
 import Sources from './Sources'
 import Tags from './Tags'
+import Users from './Users'
 import Videos from './Videos'
 import Watches from './Watches'
 
 const TABS: [string, string][] = [
   ['videos', 'Videos'], ['creators', 'Creators'], ['tags', 'Tags'], ['sources', 'Sources'],
-  ['import', 'Import'], ['watches', 'Watches'], ['merges', 'Merges'], ['maintenance', 'Maintenance'],
+  ['users', 'Users'], ['import', 'Import'], ['watches', 'Watches'], ['merges', 'Merges'], ['maintenance', 'Maintenance'],
 ]
 
 /** Admin area (DESIGN.md 9). Mounted at /admin/* behind the admin guard in App.tsx. */
@@ -36,6 +37,7 @@ export default function Admin() {
           <Route path="creators" element={<Creators />} />
           <Route path="tags" element={<Tags />} />
           <Route path="sources" element={<Sources />} />
+          <Route path="users" element={<Users />} />
           <Route path="import" element={<Import />} />
           <Route path="watches" element={<Watches />} />
           <Route path="merges" element={<Merges />} />

@@ -43,6 +43,9 @@ def invalidate() -> None:
     global _index
     with _lock:
         _index = None
+    from . import visibility  # per-viewer counts derive from the same data
+
+    visibility.invalidate()
 
 
 def _build(db: Session) -> dict[str, list[Entry]]:

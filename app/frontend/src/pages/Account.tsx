@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { errorMessage } from '../api'
+import { errorMessage, post } from '../api'
 import { PageHeader } from '../components/common'
 import { useAuth, usePlayback, useToast } from '../state'
 
@@ -41,6 +42,8 @@ export default function Account() {
               </label>
               <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>Browsers may still require a tap before playing with sound.</p>
             </div>
+            <div className="section-title">Password</div>
+            <ChangePassword />
             {user.is_admin ? (
               <>
                 <div className="section-title">Admin</div>
@@ -57,5 +60,49 @@ export default function Account() {
         </p>
       </div>
     </div>
+  )
+}
+
+function ChangePassword() {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const mismatch = !!confirm && next !== confirm
+  const save = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await post('/api/auth/password', { current_password: current, new_password: next })
+      toast('Password changed. Other devices were logged out.')
+      setOpen(false); setCurrent(''); setNext(''); setConfirm('')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!open) return <div className="card"><button className="btn" style={{ width: '100%' }} onClick={() => setOpen(true)}>Change password</button></div>
+  return (
+    <form className="card" onSubmit={(e) => { e.preventDefault(); void save() }}>
+      <label className="field">Current password
+        <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+      </label>
+      <label className="field">New password (at least 8 characters)
+        <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+      </label>
+      <label className="field">Repeat new password
+        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      </label>
+      {mismatch ? <div className="error">The new passwords don't match</div> : null}
+      {error ? <div className="error" role="alert">{error}</div> : null}
+      <div className="btnrow">
+        <button className="btn" type="button" onClick={() => setOpen(false)}>Cancel</button>
+        <button className="btn primary" type="submit" disabled={busy || !current || next.length < 8 || next !== confirm}>Change password</button>
+      </div>
+    </form>
   )
 }

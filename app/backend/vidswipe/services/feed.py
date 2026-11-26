@@ -29,8 +29,11 @@ def _rated_exists(user_id: int):
     return exists().where(Rating.video_id == Video.id, Rating.user_id == user_id)
 
 
-def build_query(db: Session, user_id: int | None, ftype: str, fid: int | None, unrated_only: bool):
+def build_query(db: Session, user_id: int | None, ftype: str, fid: int | None, unrated_only: bool,
+                allowed: frozenset[int] | None = None):
     q = select(Video).where(Video.is_hidden.is_(False))
+    if allowed is not None:  # only sources this viewer may see
+        q = q.where(Video.source_id.in_(allowed))
     if ftype == "main":
         if user_id:
             q = q.where(~_rated_exists(user_id))
@@ -146,8 +149,8 @@ def personalised_order(db: Session, user_id: int | None, candidates: list[Video]
 
 
 def get_feed(db: Session, user_id: int | None, ftype: str, fid: int | None, unrated_only: bool,
-             limit: int, exclude: list[int]) -> list[Video]:
-    q = build_query(db, user_id, ftype, fid, unrated_only)
+             limit: int, exclude: list[int], allowed: frozenset[int] | None = None) -> list[Video]:
+    q = build_query(db, user_id, ftype, fid, unrated_only, allowed)
     if exclude:
         q = q.where(Video.id.not_in(exclude))
     if ftype == "collection":

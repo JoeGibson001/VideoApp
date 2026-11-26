@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import get_settings
 from .db import get_engine, new_session
-from .routers import admin, api, auth, internal, media
+from .routers import admin, api, auth, internal, media, users
 from .services.users import seed_admin
 
 
@@ -66,6 +66,7 @@ def create_app(run_startup: bool = True) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(api.router)
     app.include_router(admin.router)
+    app.include_router(users.router)
     app.include_router(internal.router)
     app.include_router(media.router)
 

@@ -14,6 +14,7 @@ from ..models import (
 from . import search_index
 from .search_index import Entry, highlight_spans, match_score
 from .serialize import media_url
+from .visibility import Allowed, visible_entries
 from .text import compact, words
 
 SORTS = {"score_desc", "score_asc", "name_asc", "name_desc", "newest", "oldest", "most_videos", "recent"}
@@ -53,14 +54,15 @@ def entry_row(e: Entry, stats: dict | None, logged_in: bool) -> dict:
 
 
 def list_items(db: Session, user_id: int | None, kind: str, sort: str | None, q: str | None,
-               page: int, page_size: int, only_ids: set[int] | None = None) -> dict:
-    idx = search_index.get_index(db)
+               page: int, page_size: int, only_ids: set[int] | None = None, allowed: Allowed = None) -> dict:
+    vis = visible_entries(db, kind, allowed)
     stats = user_stats(db, user_id, kind)
-    entries = idx[kind]
+    entries = list(vis.values())
     if only_ids is not None:
         entries = [e for e in entries if e.id in only_ids]
     if q and compact(q):
-        res = search_index.search_entries(db, q, [kind]).get(kind, [])
+        res = [(vis[e.id], rank, sc) for e, rank, sc in search_index.search_entries(db, q, [kind]).get(kind, [])
+               if e.id in vis]
         if only_ids is not None:
             res = [r for r in res if r[0].id in only_ids]
         res.sort(key=lambda r: (-r[2], -(stats.get(r[0].id, {}).get("score", 0)), -r[0].video_count,
@@ -107,7 +109,8 @@ def _score_name(q: str, name: str) -> tuple[int, int] | None:
     return match_score(compact(q), [compact(name)], [words(name)], [])
 
 
-def search(db: Session, user_id: int | None, q: str, types: list[str], limit: int) -> dict:
+def search(db: Session, user_id: int | None, q: str, types: list[str], limit: int,
+           sources: Allowed = None) -> dict:
     allowed = set(ITEM_TYPES) | ({"collection", "category"} if user_id else set())
     types = [t for t in types if t in allowed] or [t for t in ("tag", "creator", "source", "collection", "category")
                                                    if t in allowed]
@@ -115,7 +118,8 @@ def search(db: Session, user_id: int | None, q: str, types: list[str], limit: in
     item_types = [t for t in types if t in ITEM_TYPES]
     matched = search_index.search_entries(db, q, item_types) if q.strip() else {}
     for t in item_types:
-        res = matched.get(t, [])
+        vis = visible_entries(db, t, sources)
+        res = [(vis[e.id], rank, sc) for e, rank, sc in matched.get(t, []) if e.id in vis]
         stats = user_stats(db, user_id, t, [r[0].id for r in res])
         res.sort(key=lambda r: (-r[2], -(stats.get(r[0].id, {}).get("score", 0)), -r[0].video_count,
                                 r[0].name.lower()))

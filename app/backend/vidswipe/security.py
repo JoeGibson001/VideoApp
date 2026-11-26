@@ -96,7 +96,7 @@ def get_auth(request: Request, db: Session = Depends(get_db),
     if not sess or sess.expires_at < utcnow():
         return Auth(None, None)
     user = db.get(User, sess.user_id)
-    if user is None:
+    if user is None or not user.is_active:
         return Auth(None, None)
     if request.method in UNSAFE_METHODS and not constant_time_equals(x_csrf_token, sess.csrf_token):
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid")

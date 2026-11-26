@@ -20,7 +20,7 @@ from ..models import (
     utcnow,
 )
 from ..security import Auth, get_auth, require_user
-from ..services import importer_client, library
+from ..services import importer_client, library, visibility
 from ..services.feed import FEED_TYPES, get_feed
 from ..services.ratings import clear_rating, set_rating
 from ..services.serialize import creator_dict, media_url, source_dict, video_detail, videos_summary
@@ -39,11 +39,22 @@ def _parse_ids(raw: str | None) -> list[int]:
     return out
 
 
+def _allowed(db: Session, auth: Auth) -> visibility.Allowed:
+    """Sources this viewer may see (None = all)."""
+    return visibility.allowed_for(db, auth.user)
+
+
 def _visible_video(db: Session, video_id: int, auth: Auth) -> Video:
     v = db.get(Video, video_id)
-    if v is None or (v.is_hidden and not auth.is_admin):
+    if v is None or (v.is_hidden and not auth.is_admin) or not visibility.can_see_source(_allowed(db, auth), v.source_id):
         raise HTTPException(404, "Video not found")
     return v
+
+
+def _check_item_visible(db: Session, kind: str, item_id: int, auth: Auth) -> None:
+    """404 for a tag / creator / source this viewer may not see (so not even its name leaks)."""
+    if item_id not in visibility.visible_entries(db, kind, _allowed(db, auth)):
+        raise HTTPException(404, f"{kind.capitalize()} not found")
 
 
 # ---- feed / videos / ratings ------------------------------------------------------------------
@@ -58,7 +69,9 @@ def feed(type: str = "main", id: int | None = None, unrated_only: bool = False,
         raise HTTPException(401, "Login required")
     if type not in ("main",) and id is None:
         raise HTTPException(400, "id required")
-    videos = get_feed(db, auth.user_id, type, id, unrated_only, limit, _parse_ids(exclude))
+    if type in ("tag", "creator", "source"):
+        _check_item_visible(db, type, id, auth)
+    videos = get_feed(db, auth.user_id, type, id, unrated_only, limit, _parse_ids(exclude), _allowed(db, auth))
     return {"items": videos_summary(db, videos, auth.user_id), "header": _feed_header(db, type, id, auth)}
 
 
@@ -118,7 +131,7 @@ def search(q: str = "", types: str | None = None, limit: int = Query(5, ge=1, le
     tlist = [t.strip() for t in types.split(",")] if types else []
     if not q.strip():
         return {"q": q, "groups": {}}
-    return library.search(db, auth.user_id, q, tlist, limit)
+    return library.search(db, auth.user_id, q, tlist, limit, _allowed(db, auth))
 
 
 @router.get("/search/recent")
@@ -190,7 +203,7 @@ def _list(kind: str):
             watched = watched_creator_ids(db)
             if watched_only:
                 only = watched or set()
-        res = library.list_items(db, auth.user_id, kind, sort, q, page, page_size, only)
+        res = library.list_items(db, auth.user_id, kind, sort, q, page, page_size, only, _allowed(db, auth))
         if watched is not None:
             for it in res["items"]:
                 it["watched"] = it["id"] in watched
@@ -204,9 +217,7 @@ router.add_api_route("/sources", _list("source"), methods=["GET"])
 
 
 def _item(db: Session, kind: str, item_id: int, auth: Auth) -> dict:
-    from ..services import search_index
-
-    entry = next((e for e in search_index.get_index(db)[kind] if e.id == item_id), None)
+    entry = visibility.visible_entries(db, kind, _allowed(db, auth)).get(item_id)
     if entry is None:
         raise HTTPException(404, f"{kind} not found")
     stats = library.user_stats(db, auth.user_id, kind, [item_id])
@@ -264,8 +275,18 @@ def _own_category(db: Session, cid: int, user: User) -> Category:
     return c
 
 
-def _category_summary(db: Session, c: Category, user_id: int) -> dict:
+def _visible_category_items(db: Session, c: Category) -> list[CategoryItem]:
+    """Category items the owner can still see (items from sources they lost access to are left out)."""
     items = db.scalars(select(CategoryItem).where(CategoryItem.category_id == c.id)).all()
+    allowed = visibility.user_allowed(db, db.get(User, c.user_id))
+    if allowed is None:
+        return list(items)
+    vis = {k: visibility.visible_entries(db, k, allowed) for k in ("tag", "creator", "source")}
+    return [i for i in items if i.item_id in vis.get(i.item_type, {})]
+
+
+def _category_summary(db: Session, c: Category, user_id: int) -> dict:
+    items = _visible_category_items(db, c)
     score = 0
     for kind in ("tag", "creator", "source"):
         ids = [i.item_id for i in items if i.item_type == kind]
@@ -292,17 +313,15 @@ def create_category(body: CategoryIn, user: User = Depends(require_user), db: Se
 
 @router.get("/categories/{cid}")
 def get_category(cid: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    from ..services import search_index
-
     c = _own_category(db, cid, user)
     out = _category_summary(db, c, user.id)
-    items = db.scalars(select(CategoryItem).where(CategoryItem.category_id == c.id)).all()
-    idx = search_index.get_index(db)
+    items = _visible_category_items(db, c)
+    allowed = visibility.user_allowed(db, user)
     sections: dict[str, list] = {"tag": [], "creator": [], "source": []}
     for kind in sections:
         ids = {i.item_id: i.id for i in items if i.item_type == kind}
         stats = library.user_stats(db, user.id, kind, list(ids))
-        for e in idx[kind]:
+        for e in visibility.visible_entries(db, kind, allowed).values():
             if e.id in ids:
                 row = library.entry_row(e, stats.get(e.id), True)
                 row["category_item_id"] = ids[e.id]
@@ -338,6 +357,8 @@ def add_category_item(cid: int, body: CategoryItemIn, user: User = Depends(requi
     c = _own_category(db, cid, user)
     model = {"tag": Tag, "creator": Creator, "source": Source}.get(body.item_type)
     if model is None or db.get(model, body.item_id) is None:
+        raise HTTPException(404, "Item not found")
+    if body.item_id not in visibility.visible_entries(db, body.item_type, visibility.user_allowed(db, user)):
         raise HTTPException(404, "Item not found")
     existing = db.scalar(select(CategoryItem).where(CategoryItem.category_id == c.id,
                                                     CategoryItem.item_type == body.item_type,
@@ -386,11 +407,20 @@ def _collection_order(c: Collection):
     return (CollectionVideo.position.asc(), CollectionVideo.added_at.asc())
 
 
+def _collection_filters(db: Session, c: Collection) -> list:
+    """Visible videos of a collection, for its owner (hidden videos and sources they can't see are left out)."""
+    conds = [CollectionVideo.collection_id == c.id, Video.is_hidden.is_(False)]
+    allowed = visibility.user_allowed(db, db.get(User, c.user_id))
+    if allowed is not None:
+        conds.append(Video.source_id.in_(allowed))
+    return conds
+
+
 def _collection_summary(db: Session, c: Collection) -> dict:
-    count = db.scalar(select(func.count()).select_from(CollectionVideo).join(Video).where(
-        CollectionVideo.collection_id == c.id, Video.is_hidden.is_(False)))
-    cover = db.scalar(select(Video.poster_path).join(CollectionVideo).where(
-        CollectionVideo.collection_id == c.id, Video.is_hidden.is_(False)).order_by(*_collection_order(c)).limit(1))
+    conds = _collection_filters(db, c)
+    count = db.scalar(select(func.count()).select_from(CollectionVideo).join(Video).where(*conds))
+    cover = db.scalar(select(Video.poster_path).join(CollectionVideo).where(*conds)
+                      .order_by(*_collection_order(c)).limit(1))
     return {"id": c.id, "name": c.name, "system_type": c.system_type, "video_count": count,
             "cover_url": media_url(cover), "created_at": c.created_at.isoformat() + "Z",
             "updated_at": c.updated_at.isoformat() + "Z"}
@@ -420,8 +450,8 @@ def create_collection(body: CollectionIn, user: User = Depends(require_user), db
 @router.get("/collections/{cid}")
 def get_collection(cid: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     c = _own_collection(db, cid, user)
-    vids = db.scalars(select(Video).join(CollectionVideo).where(
-        CollectionVideo.collection_id == c.id, Video.is_hidden.is_(False)).order_by(*_collection_order(c))).unique()
+    vids = db.scalars(select(Video).join(CollectionVideo).where(*_collection_filters(db, c))
+                      .order_by(*_collection_order(c))).unique()
     out = _collection_summary(db, c)
     out["videos"] = videos_summary(db, list(vids), user.id)
     return out
@@ -454,7 +484,8 @@ def add_to_collection(cid: int, body: CollectionVideoIn, user: User = Depends(re
     c = _own_collection(db, cid, user)
     if c.system_type == "liked":
         raise HTTPException(400, "Liked is managed automatically; like the video instead")
-    if db.get(Video, body.video_id) is None:
+    v = db.get(Video, body.video_id)
+    if v is None or not visibility.can_see_source(visibility.user_allowed(db, user), v.source_id):
         raise HTTPException(404, "Video not found")
     if db.get(CollectionVideo, {"collection_id": c.id, "video_id": body.video_id}) is None:
         pos = (db.scalar(select(func.max(CollectionVideo.position)).where(CollectionVideo.collection_id == c.id))
