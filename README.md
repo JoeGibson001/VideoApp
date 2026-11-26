@@ -30,6 +30,10 @@ docker-compose.e2e.yml
 .env.example
 ```
 
+## Unraid
+
+Ready-made images are published to GitHub Container Registry by `.github/workflows/docker-publish.yml`. See [unraid/README.md](unraid/README.md) for setting up with the Docker Compose Manager plugin.
+
 ## Running
 
 ```sh

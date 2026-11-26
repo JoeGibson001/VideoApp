@@ -1,0 +1,49 @@
+# Tastebud for Unraid (Docker Compose Manager plugin).
+# Uses the images published by GitHub Actions; nothing is built on the server.
+# Settings live in the stack's .env file (see unraid/.env.example and unraid/README.md).
+name: tastebud
+
+services:
+  app:
+    image: ghcr.io/joegibson001/tastebud-app:${TASTEBUD_TAG:-latest}
+    container_name: tastebud-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      IMPORTER_URL: http://tastebud-importer:8081
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - ${APPDATA_PATH:-/mnt/user/appdata/tastebud}/app:/data
+      - ${MEDIA_PATH:-/mnt/user/media/tastebud}:/media
+    depends_on:
+      - importer
+    networks: [default]
+    labels:
+      net.unraid.docker.webui: "http://[IP]:[PORT:8080]/"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/JoeGibson001/VideoApp/main/tastebud-icon-pack/png/any/icon-256.png"
+
+  importer:
+    image: ghcr.io/joegibson001/tastebud-importer:${TASTEBUD_TAG:-latest}
+    container_name: tastebud-importer
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_INTERNAL_URL: http://tastebud-app:8080
+    # Only needed to call the Importer API from outside (scripts, iOS Shortcuts):
+    # ports:
+    #   - "8081:8081"
+    volumes:
+      - ${APPDATA_PATH:-/mnt/user/appdata/tastebud}/importer:/data
+      - ${MEDIA_PATH:-/mnt/user/media/tastebud}:/media
+    networks: [default]
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/JoeGibson001/VideoApp/main/tastebud-icon-pack/png/any/icon-256.png"
+
+networks:
+  default:
+    name: tastebud
+  # To put the app on SWAG's network instead (see README): uncomment this block, change "proxynet"
+  # to SWAG's network name, and add "proxynet" to the app's `networks:` list above.
+  # proxynet:
+  #   external: true
