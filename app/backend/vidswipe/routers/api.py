@@ -71,8 +71,12 @@ def feed(type: str = "main", id: int | None = None, unrated_only: bool = False,
         raise HTTPException(400, "id required")
     if type in ("tag", "creator", "source"):
         _check_item_visible(db, type, id, auth)
-    videos = get_feed(db, auth.user_id, type, id, unrated_only, limit, _parse_ids(exclude), _allowed(db, auth))
-    return {"items": videos_summary(db, videos, auth.user_id), "header": _feed_header(db, type, id, auth)}
+    allowed = _allowed(db, auth)
+    videos = get_feed(db, auth.user_id, type, id, unrated_only, limit, _parse_ids(exclude), allowed)
+    # Tells the app to ask visitors to log in when they may not see any source at all.
+    login_required = auth.user is None and allowed is not None and not allowed
+    return {"items": videos_summary(db, videos, auth.user_id), "header": _feed_header(db, type, id, auth),
+            "login_required": login_required}
 
 
 def _feed_header(db: Session, ftype: str, fid: int | None, auth: Auth) -> dict | None:

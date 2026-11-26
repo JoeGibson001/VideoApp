@@ -47,6 +47,7 @@ def test_search_creators_by_handle_and_groups(admin):
 def test_anonymous_search_limited(client):
     login(client)
     ingest(client, tags=["cars"])
+    client.put("/api/admin/visibility/anonymous", json={"all_sources": True})
     client.post("/api/collections", json={"name": "cars stuff"})
     client.post("/api/auth/logout")
     r = client.get("/api/search", params={"q": "car"}).json()["groups"]

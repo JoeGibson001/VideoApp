@@ -74,6 +74,7 @@ def test_anonymous_feed_and_restrictions(client):
 
     login(client)
     v = ingest(client)
+    client.put("/api/admin/visibility/anonymous", json={"all_sources": True})
     client.post("/api/auth/logout")
     client.headers.pop("X-CSRF-Token", None)
     assert ids(client.get("/api/feed")) == [v]

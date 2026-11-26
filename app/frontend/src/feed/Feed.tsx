@@ -38,6 +38,7 @@ export default function Feed({ type, id }: { type: FeedType; id?: number }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [header, setHeader] = useState<FeedHeader | null>(null)
+  const [loginRequired, setLoginRequired] = useState(false)
   const [unratedOnly, setUnratedOnly] = useState(false)
   const [ratings, setRatings] = useState<Record<number, 1 | -1 | null>>({})
   const [favs, setFavs] = useState<Record<number, boolean>>({})
@@ -80,11 +81,12 @@ export default function Feed({ type, id }: { type: FeedType; id?: number }) {
     setLoading(true)
     try {
       const have = reset ? [] : itemsRef.current
-      const r = await get<{ items: VideoSummary[]; header: FeedHeader | null }>('/api/feed', {
+      const r = await get<{ items: VideoSummary[]; header: FeedHeader | null; login_required?: boolean }>('/api/feed', {
         type, id, limit: PAGE, unrated_only: isFiltered && unratedOnly ? true : undefined,
         exclude: have.map((v) => v.id).join(',') || undefined,
       })
       setHeader(r.header)
+      setLoginRequired(!!r.login_required)
       setError(null)
       const seen = new Set(have.map((v) => v.id))
       const fresh = r.items.filter((v) => !seen.has(v.id))
@@ -400,7 +402,14 @@ export default function Feed({ type, id }: { type: FeedType; id?: number }) {
           <div className="vcard" style={{ top: `${items.length * 100}%` }} data-testid={atEnd ? 'end-card' : undefined}>
             <div className="endcard">
               {error ? <><h2>Could not load videos</h2><p className="muted">{error}</p>
-                <button className="btn primary" onClick={() => void loadMore(items.length === 0)}>Try again</button></> : (
+                <button className="btn primary" onClick={() => void loadMore(items.length === 0)}>Try again</button></> : loginRequired && !user ? (
+                <div data-testid="login-required" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <img src="/icons/icon-192.png" alt="" width={72} height={72} style={{ borderRadius: 18 }} />
+                  <h2>Log in to watch</h2>
+                  <p className="muted">Tastebud is only available to members.</p>
+                  <Link className="btn primary" to="/login">Log in</Link>
+                </div>
+              ) : (
                 <>
                   <h2>{items.length ? "You're all caught up" : 'Nothing here yet'}</h2>
                   <p className="muted">{isFiltered ? 'There are no more videos in this feed.' : 'You have seen every new video. Explore more:'}</p>
@@ -446,7 +455,7 @@ export default function Feed({ type, id }: { type: FeedType; id?: number }) {
         <Link to="/search" className="iconbtn" aria-label="Search" style={{ marginLeft: 'auto' }}><Search /></Link>
       </div>
 
-      {!user && !bannerHidden ? (
+      {!user && !bannerHidden && !loginRequired ? (
         <div className="banner" role="note">
           <span><Link to="/login">Log in</Link> to save your likes</span>
           <button className="iconbtn plain" aria-label="Dismiss" onClick={() => { setBannerHidden(true); writeFlag('vs_banner_dismissed') }}><Close /></button>

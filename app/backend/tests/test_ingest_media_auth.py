@@ -43,7 +43,8 @@ def _media_file(env):
     return data
 
 
-def test_range_request_206(client, env):
+def test_range_request_206(admin, env):
+    client = admin  # visitors see no sources by default
     data = _media_file(env)
     r = client.get("/media/videos/youtube.com/x.mp4", headers={"Range": "bytes=100-199"})
     assert r.status_code == 206

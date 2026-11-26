@@ -176,3 +176,20 @@ test('search updates on each keystroke and is typo tolerant', async ({ page }) =
   await input.pressSequentially('drfit', { delay: 60 })
   await expect(page.getByTestId('search-group-tag')).toContainText('drift')
 })
+
+test('visitors are asked to log in when no sources are shared with them', async ({ page }) => {
+  const { request: req } = await import('@playwright/test')
+  const { setVisitorAccess } = await import('./global-setup')
+  const ctx = await req.newContext({ baseURL: process.env.E2E_BASE_URL || 'http://localhost:8080' })
+  try {
+    await setVisitorAccess(ctx, false)
+    await page.goto('/')
+    await expect(page.getByTestId('login-required')).toBeVisible()
+    await expect(page.getByText('to save your likes')).toHaveCount(0)
+    await page.getByRole('link', { name: 'Log in' }).click()
+    await expect(page).toHaveURL(/\/login/)
+  } finally {
+    await setVisitorAccess(ctx, true)
+    await ctx.dispose()
+  }
+})

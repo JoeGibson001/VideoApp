@@ -174,8 +174,14 @@ def test_admin_can_hide_sources_from_self(admin, env):
 def test_anonymous_access(admin, env):
     yt, vm, yt_src, vm_src = _setup(admin, env)
     anon = _new_client(admin)
-    assert admin.get("/api/admin/visibility/anonymous").json() == {"all_sources": True, "source_ids": []}
-    assert len(anon.get("/api/feed").json()["items"]) == 2  # default: everything, as before
+    assert admin.get("/api/admin/visibility/anonymous").json() == {"all_sources": False, "source_ids": []}
+    r = anon.get("/api/feed").json()  # default: visitors see nothing and are asked to log in
+    assert r["items"] == [] and r["login_required"] is True
+    assert anon.get(f"/api/videos/{yt}").status_code == 404 and anon.get("/api/tags").json()["items"] == []
+    assert admin.get("/api/feed").json()["login_required"] is False
+    admin.put("/api/admin/visibility/anonymous", json={"all_sources": True})
+    r = anon.get("/api/feed").json()
+    assert len(r["items"]) == 2 and r["login_required"] is False
     assert admin.put("/api/admin/visibility/anonymous", json={"all_sources": False,
                                                              "source_ids": [999]}).status_code == 400
     admin.put("/api/admin/visibility/anonymous", json={"all_sources": False, "source_ids": [vm_src]})

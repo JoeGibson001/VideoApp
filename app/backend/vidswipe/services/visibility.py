@@ -26,8 +26,8 @@ def user_allowed(db: Session, user: User) -> Allowed:
 def anonymous_setting(db: Session) -> dict:
     row = db.get(AppSetting, ANON_KEY)
     value = (row.value if row else None) or {}
-    # Default (no setting saved yet): visitors see everything, as before this feature existed.
-    return {"all_sources": bool(value.get("all_sources", True)), "source_ids": list(value.get("source_ids", []))}
+    # Default (no setting saved yet): visitors see nothing until an admin chooses sources for them.
+    return {"all_sources": bool(value.get("all_sources", False)), "source_ids": list(value.get("source_ids", []))}
 
 
 def anonymous_allowed(db: Session) -> Allowed:

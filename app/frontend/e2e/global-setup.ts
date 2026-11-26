@@ -1,4 +1,4 @@
-import { request } from '@playwright/test'
+import { request, type APIRequestContext } from '@playwright/test'
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:8080'
 const KEY = process.env.E2E_INGEST_KEY || 'e2e-ingest'
@@ -41,5 +41,19 @@ export default async function globalSetup() {
     })
     if (!r.ok()) throw new Error(`seed failed: ${r.status()} ${await r.text()}`)
   }
+  // Visitors see nothing by default; the anonymous-mode tests need them to see the fixtures.
+  await setVisitorAccess(ctx, true)
   await ctx.dispose()
+}
+
+export async function setVisitorAccess(ctx: APIRequestContext, all: boolean) {
+  const login = await ctx.post('/api/auth/login', {
+    data: { username: 'admin', password: process.env.E2E_ADMIN_PASSWORD || 'e2e-admin' },
+  })
+  if (!login.ok()) throw new Error(`admin login failed: ${login.status()}`)
+  const csrf = (await ctx.storageState()).cookies.find((c) => c.name === 'vs_csrf')?.value || ''
+  const r = await ctx.put('/api/admin/visibility/anonymous', {
+    headers: { 'X-CSRF-Token': csrf }, data: { all_sources: all, source_ids: [] },
+  })
+  if (!r.ok()) throw new Error(`visitor access failed: ${r.status()} ${await r.text()}`)
 }
