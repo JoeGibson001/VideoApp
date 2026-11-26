@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, get, patch, put } from '../api'
+import { api, del, get, patch, post, put } from '../api'
 import { Avatar, EmptyState, Spinner } from '../components/common'
 import { ChevronLeft, External, Search } from '../components/Icons'
 import { WatchIndicator, WatchSection } from '../components/WatchSection'
@@ -158,6 +158,38 @@ function TemplatesCard({ source, onSaved }: { source: AdminSource; onSaved: (s: 
 
 interface SourceTagRow {
   id: number; name: string; video_count: number; custom_url: string | null; url: string | null; watch: WatchStatus
+  added?: boolean
+}
+
+interface AddedTag { id: number; name: string; via_alias: boolean; message: string | null; already_on_source: boolean }
+
+/** Add a tag to the source by hand, e.g. to watch its tag page before any video has it. */
+function AddSourceTag({ sourceId, onAdded }: { sourceId: number; onAdded: (t: AddedTag) => void }) {
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [more, setMore] = useState(false)
+  const act = useAction()
+  const add = async () => {
+    if (!name.trim()) return
+    const r = await act.run(() => post<AddedTag>(`/api/admin/sources/${sourceId}/tags`, { name, url: url.trim() || null }))
+    if (r) { setName(''); setUrl(''); setMore(false); onAdded(r) }
+  }
+  return (
+    <div style={{ margin: '4px 0 10px' }}>
+      <div className="rowline">
+        <input type="text" value={name} placeholder="Add a tag to this source" aria-label="Tag name to add"
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add() }} />
+        <button className="btn small primary" disabled={act.busy || !name.trim()} onClick={() => void add()}>Add tag</button>
+        <button className="btn small" type="button" aria-expanded={more} onClick={() => setMore((m) => !m)}>URL...</button>
+      </div>
+      {more ? (
+        <input type="url" value={url} placeholder="Custom tag page URL (optional, otherwise the template is used)"
+          aria-label="Custom tag page URL" style={{ marginTop: 6 }} onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void add() }} />
+      ) : null}
+      <ErrorBox error={act.error} />
+    </div>
+  )
 }
 
 function SourceTags({ source }: { source: AdminSource }) {
@@ -166,6 +198,7 @@ function SourceTags({ source }: { source: AdminSource }) {
   const [sort, setSort] = useState<'videos' | 'name'>('videos')
   const [page, setPage] = useState(1)
   const [open, setOpen] = useState<number | null>(null)
+  const toast = useToast()
   const pageSize = 100
   const list = useLoad(() => get<{ items: SourceTagRow[]; total: number }>(`/api/admin/sources/${source.id}/tags`,
     { q: dq, sort, page, page_size: pageSize }), [source.id, dq, sort, page, source.tag_url_template])
@@ -181,6 +214,10 @@ function SourceTags({ source }: { source: AdminSource }) {
       {!source.tag_url_template ? (
         <div className="notice" style={{ fontSize: 13 }}>Set a tag page URL template above, or give individual tags a URL, to watch them.</div>
       ) : null}
+      <AddSourceTag sourceId={source.id} onAdded={(t) => {
+        toast(t.message || (t.already_on_source ? `#${t.name} is already on ${source.name}` : `Added #${t.name}`))
+        setQ(t.name); setPage(1); setOpen(t.id)
+      }} />
       <div className="toolbar">
         <div className="searchbox" style={{ flex: 1, margin: 0 }}>
           <Search />
@@ -195,7 +232,8 @@ function SourceTags({ source }: { source: AdminSource }) {
       <ErrorBox error={list.error} />
       {list.loading && !list.data ? <Spinner /> : !rows.length ? <EmptyState>No tags</EmptyState> : rows.map((t) => (
         <SourceTagItem key={t.id} sourceId={source.id} sourceName={source.name} row={t} open={open === t.id}
-          onToggle={() => setOpen((o) => (o === t.id ? null : t.id))} onChanged={update} />
+          onToggle={() => setOpen((o) => (o === t.id ? null : t.id))} onChanged={update}
+          onRemoved={() => { setOpen(null); void list.reload(true) }} />
       ))}
       {list.data && list.data.total > pageSize ? (
         <Pager page={page} pageSize={pageSize} total={list.data.total} onPage={setPage} />
@@ -204,11 +242,19 @@ function SourceTags({ source }: { source: AdminSource }) {
   )
 }
 
-function SourceTagItem({ sourceId, sourceName, row, open, onToggle, onChanged }: {
-  sourceId: number; sourceName: string; row: SourceTagRow; open: boolean; onToggle: () => void; onChanged: (r: SourceTagRow) => void
+function SourceTagItem({ sourceId, sourceName, row, open, onToggle, onChanged, onRemoved }: {
+  sourceId: number; sourceName: string; row: SourceTagRow; open: boolean; onToggle: () => void
+  onChanged: (r: SourceTagRow) => void; onRemoved: () => void
 }) {
   const [url, setUrl] = useState(row.custom_url || '')
   const act = useAction()
+  const remove = async () => {
+    const watched = row.watch.watches.length > 0
+    const note = watched ? ' It stays listed while it has a watch; pause or delete the watch on the Watches page.' : ''
+    if (!window.confirm(`Remove #${row.name} from ${sourceName}?${note}`)) return
+    const r = await act.run(() => del(`/api/admin/sources/${sourceId}/tags/${row.id}`), `Removed #${row.name}`)
+    if (r !== undefined) onRemoved()
+  }
   const saveUrl = async (value: string) => {
     const r = await act.run(() => put<{ custom_url: string | null; url: string | null }>(
       `/api/admin/sources/${sourceId}/tags/${row.id}`, { url: value }), value ? 'Tag URL saved' : 'Tag URL reset')
@@ -220,7 +266,7 @@ function SourceTagItem({ sourceId, sourceName, row, open, onToggle, onChanged }:
         <span className="rowicon" aria-hidden="true">#</span>
         <span className="itemrow-text">
           <span className="itemrow-name">{row.name}</span>
-          <small>{row.video_count} video{row.video_count === 1 ? '' : 's'}{row.custom_url ? ' - custom URL' : ''}{row.url ? '' : ' - no URL'}</small>
+          <small>{row.video_count} video{row.video_count === 1 ? '' : 's'}{row.added && !row.video_count ? ' - added by hand' : ''}{row.custom_url ? ' - custom URL' : ''}{row.url ? '' : ' - no URL'}</small>
         </span>
         {row.watch.state !== 'none' ? <WatchIndicator state={row.watch.state} /> : null}
       </button>
@@ -246,6 +292,11 @@ function SourceTagItem({ sourceId, sourceName, row, open, onToggle, onChanged }:
             <WatchSection endpoint={`/api/admin/sources/${sourceId}/tags/${row.id}/watch`} defaultTags={[row.name]}
               description={`${row.url} is checked once a day for new videos. Imports are tagged #${row.name} by default.`} />
           ) : <div className="muted" style={{ fontSize: 13 }}>Needs a tag page URL before it can be watched.</div>}
+          {row.added && row.video_count === 0 ? (
+            <div className="btnrow">
+              <button className="btn small danger" disabled={act.busy} onClick={() => void remove()}>Remove tag from {sourceName}</button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

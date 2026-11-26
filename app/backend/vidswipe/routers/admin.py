@@ -549,7 +549,7 @@ def source_tags(source_id: int, q: str = "", sort: str = "videos", page: int = Q
     overrides = {st.tag_id: st.url for st in db.scalars(select(SourceTag).where(SourceTag.source_id == s.id))}
     links = list(db.scalars(select(WatchLink).where(WatchLink.kind == "source_tag", WatchLink.source_id == s.id)))
     linked_tags = {lk.tag_id for lk in links}
-    ids = set(counts) | {k for k, v in overrides.items() if v} | linked_tags
+    ids = set(counts) | set(overrides) | linked_tags  # used by videos, added by hand, or watched
     tags = list(db.scalars(select(Tag).where(Tag.id.in_(ids)))) if ids else []
     if q.strip():
         nq = normalize_tag(q)
@@ -565,6 +565,7 @@ def source_tags(source_id: int, q: str = "", sort: str = "videos", page: int = Q
     for t in chunk:
         custom = overrides.get(t.id)
         item = {"id": t.id, "name": t.name, "video_count": counts.get(t.id, 0), "custom_url": custom,
+                "added": t.id in overrides,
                 "url": custom or urls.tag_url(s.tag_url_template, s.domain, t.name)}
         if t.id in linked_tags:
             item["watch"] = watch_targets.summarize(
@@ -588,15 +589,56 @@ def set_source_tag_url(source_id: int, tag_id: int, body: SourceTagUrlIn, db: Se
         raise HTTPException(404, "Tag not found")
     url = urls.validate_url(body.url)
     st = db.get(SourceTag, {"source_id": s.id, "tag_id": t.id})
-    if url:
-        if st is None:
+    if st is None:
+        if url:
             db.add(SourceTag(source_id=s.id, tag_id=t.id, url=url))
-        else:
-            st.url = url
-    elif st is not None:
-        db.delete(st)
+    else:
+        st.url = url  # clearing keeps the row, so a manually added tag stays on the source
     db.commit()
     return {"id": t.id, "name": t.name, "custom_url": url, "url": watch_targets.source_tag_url(db, s, t)}
+
+
+class AddSourceTagIn(BaseModel):
+    name: str
+    url: str | None = None
+
+
+@router.post("/sources/{source_id}/tags", status_code=201)
+def add_source_tag(source_id: int, body: AddSourceTagIn, db: Session = Depends(get_db)):
+    """Add a tag to a source by hand (e.g. to watch its tag page before any video has it).
+
+    The name goes through the normal resolver, so a merged name maps to the surviving tag.
+    """
+    s = _source_or_404(db, source_id)
+    norm = normalize_tag(body.name)
+    if not norm:
+        raise HTTPException(400, "Enter a tag name")
+    url = urls.validate_url(body.url)
+    existing, via_alias = find_tag(db, norm)
+    from ..services.resolve import resolve_tag
+
+    t = existing or resolve_tag(db, norm)
+    st = db.get(SourceTag, {"source_id": s.id, "tag_id": t.id})
+    already = st is not None
+    if st is None:
+        db.add(SourceTag(source_id=s.id, tag_id=t.id, url=url))
+    elif url:
+        st.url = url
+    db.commit()
+    search_index.invalidate()
+    msg = f"'{norm}' is merged into '{t.name}'" if via_alias else None
+    return {"id": t.id, "name": t.name, "created_tag": existing is None, "already_on_source": already,
+            "via_alias": via_alias, "message": msg, "url": watch_targets.source_tag_url(db, s, t)}
+
+
+@router.delete("/sources/{source_id}/tags/{tag_id}")
+def remove_source_tag(source_id: int, tag_id: int, db: Session = Depends(get_db)):
+    """Remove a hand-added tag (and its custom URL) from a source. Videos and the tag itself are kept;
+    the tag still shows on the source while its videos or a watch use it."""
+    s = _source_or_404(db, source_id)
+    db.execute(delete(SourceTag).where(SourceTag.source_id == s.id, SourceTag.tag_id == tag_id))
+    db.commit()
+    return {"ok": True}
 
 
 def _source_tag(db: Session, source_id: int, tag_id: int) -> tuple[Source, Tag]:

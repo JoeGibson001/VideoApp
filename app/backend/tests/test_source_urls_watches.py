@@ -230,3 +230,44 @@ def test_delete_source_removes_links(admin, fake, db):
     db.expire_all()
     assert db.execute(text("SELECT COUNT(*) FROM source_tags")).scalar() == 0
     assert db.execute(text("SELECT COUNT(*) FROM watch_links")).scalar() == 0
+
+
+def test_add_tag_to_source_then_watch(admin, fake):
+    a = ingest(admin, domain="example.com", tags=["drift"])
+    sid = source_id(admin, a)
+    admin.patch(f"/api/admin/sources/{sid}", json={"tag_url_template": "/tags/{tag_dash}"})
+    assert admin.post(f"/api/admin/sources/{sid}/tags", json={"name": "  "}).status_code == 400
+    r = admin.post(f"/api/admin/sources/{sid}/tags", json={"name": "Big Cats"}).json()
+    assert r["name"] == "big cats" and r["created_tag"] and r["url"] == "https://example.com/tags/big-cats"
+    rows = {t["name"]: t for t in admin.get(f"/api/admin/sources/{sid}/tags").json()["items"]}
+    assert rows["big cats"]["video_count"] == 0 and rows["big cats"]["added"]
+    assert not rows["drift"]["added"]
+    # adding again is harmless; a custom URL can be given at the same time
+    r = admin.post(f"/api/admin/sources/{sid}/tags", json={"name": "big cats", "url": "https://example.com/c/cats"}).json()
+    assert r["already_on_source"] and r["url"] == "https://example.com/c/cats"
+    # clearing the custom URL keeps the tag on the source
+    admin.put(f"/api/admin/sources/{sid}/tags/{r['id']}", json={"url": ""})
+    assert "big cats" in [t["name"] for t in admin.get(f"/api/admin/sources/{sid}/tags").json()["items"]]
+    # watch it
+    st = admin.post(f"/api/admin/sources/{sid}/tags/{r['id']}/watch", json={"enabled": True}).json()
+    assert st["state"] == "watching" and st["watches"][0]["url"] == "https://example.com/tags/big-cats"
+    assert st["watches"][0]["tags"] == ["big cats"]
+    # empty-item cleanup must not delete it
+    assert "big cats" not in [t["name"] for t in admin.get("/api/admin/cleanup").json()["tags"]]
+    # not on other sources
+    b = ingest(admin, domain="other.com", tags=["x"])
+    assert "big cats" not in [t["name"] for t in admin.get(f"/api/admin/sources/{source_id(admin, b)}/tags").json()["items"]]
+
+
+def test_add_tag_resolves_aliases_and_remove(admin, fake):
+    a = ingest(admin, domain="example.com", tags=["dogs", "dog"])
+    sid = source_id(admin, a)
+    admin.post("/api/admin/tags/merge", json={"from_ids": [tag_id(admin, "dogs")], "into_id": tag_id(admin, "dog")})
+    r = admin.post(f"/api/admin/sources/{sid}/tags", json={"name": "dogs"}).json()
+    assert r["name"] == "dog" and r["via_alias"] and not r["created_tag"]
+    n = admin.post(f"/api/admin/sources/{sid}/tags", json={"name": "puppies"}).json()
+    assert admin.delete(f"/api/admin/sources/{sid}/tags/{n['id']}").status_code == 200
+    names = [t["name"] for t in admin.get(f"/api/admin/sources/{sid}/tags").json()["items"]]
+    assert "puppies" not in names and "dog" in names
+    # once removed and unused, the cleanup may delete it
+    assert "puppies" in [t["name"] for t in admin.get("/api/admin/cleanup").json()["tags"]]

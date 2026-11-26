@@ -7,7 +7,7 @@ from sqlalchemy import delete, exists, func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import CategoryItem, Creator, CreatorAlias, Source, Tag, Video, VideoTag
+from ..models import CategoryItem, Creator, CreatorAlias, Source, SourceTag, Tag, Video, VideoTag, WatchLink
 from ..routers.media import MEDIA_ROOTS, delete_media_file, prune_empty_dirs, remove_domain_dirs
 from . import search_index
 from .ingest import attach_tags, ingest, iter_sidecars, payload_from_sidecar, read_sidecar
@@ -176,8 +176,11 @@ def find_empty(db: Session) -> dict:
 
     A source counts as empty when it has no videos; its creators are then empty too.
     """
+    # tags added to a source by hand or watched on a source are in use even without videos
     tags = db.execute(select(Tag.id, Tag.name).where(
-        ~exists().where(VideoTag.tag_id == Tag.id)).order_by(Tag.name)).all()
+        ~exists().where(VideoTag.tag_id == Tag.id),
+        ~exists().where(SourceTag.tag_id == Tag.id),
+        ~exists().where(WatchLink.tag_id == Tag.id)).order_by(Tag.name)).all()
     creators = db.execute(select(Creator.id, Creator.name, Creator.handle).where(
         ~exists().where(Video.creator_id == Creator.id)).order_by(Creator.name)).all()
     sources = db.execute(select(Source.id, Source.name, Source.domain).where(
