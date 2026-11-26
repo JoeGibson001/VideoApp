@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/home/importer
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates iptables iproute2 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 importer \
  && useradd --uid 1000 --gid importer --create-home --home-dir /home/importer --shell /usr/sbin/nologin importer \

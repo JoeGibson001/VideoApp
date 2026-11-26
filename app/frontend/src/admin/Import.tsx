@@ -21,7 +21,8 @@ export interface ImportJob {
   finished_at: string | null
 }
 
-interface Health { online: boolean; error?: string; version?: string; yt_dlp_version?: string; jobs?: Record<string, number> }
+interface Health { online: boolean; error?: string; version?: string; yt_dlp_version?: string; jobs?: Record<string, number>
+  proxy?: { enabled: boolean; url: string | null; firewall: boolean } }
 
 const ACTIVE = new Set(['queued', 'running'])
 
@@ -72,6 +73,12 @@ export default function Import() {
         <div className="muted" style={{ fontSize: 12 }}>
           Importer online{health.data.version ? ` v${health.data.version}` : ''}{health.data.yt_dlp_version ? `, yt-dlp ${health.data.yt_dlp_version}` : ''}
           {health.data.jobs ? ` - ${Object.entries(health.data.jobs).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ')}` : ''}
+          {health.data.proxy?.enabled ? (
+            <div data-testid="proxy-status">
+              All traffic via proxy {health.data.proxy.url}
+              {health.data.proxy.firewall ? ', direct connections blocked' : ' (firewall off: PROXY_KILL_SWITCH=false)'}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

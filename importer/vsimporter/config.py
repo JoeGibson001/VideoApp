@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .proxy import normalize as normalize_proxy
+
 IMPORTER_VERSION = "1.0.0"
 
 
@@ -40,6 +42,11 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
+    # All internet traffic goes through this proxy when set (http://, https://, socks5://, socks5h://).
+    proxy_url: str = ""
+    # With a proxy, the entrypoint firewalls everything else (needs NET_ADMIN). false = proxy only.
+    proxy_kill_switch: bool = True
+
     data_dir: Path = Path("/data")
     media_dir: Path = Path("/media")
 
@@ -56,6 +63,11 @@ class Settings(BaseSettings):
         hh, mm = v.strip().split(":")[:2]
         time(int(hh), int(mm))
         return f"{int(hh):02d}:{int(mm):02d}"
+
+    @field_validator("proxy_url")
+    @classmethod
+    def _check_proxy(cls, v: str) -> str:
+        return normalize_proxy(v) or ""
 
     @field_validator("tz")
     @classmethod
@@ -91,6 +103,10 @@ class Settings(BaseSettings):
             return None
         p = Path(self.ytdlp_cookies_file)
         return p if p.is_file() else None
+
+    @property
+    def proxy(self) -> str | None:
+        return self.proxy_url or None
 
     @property
     def max_file_bytes(self) -> int | None:

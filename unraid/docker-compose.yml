@@ -30,6 +30,9 @@ services:
     env_file: .env
     environment:
       APP_INTERNAL_URL: http://tastebud-app:8080
+    # Lets the entrypoint firewall everything except the proxy when PROXY_URL is set.
+    # The importer itself runs without it (the capability is dropped before it starts).
+    cap_add: [NET_ADMIN]
     # Only needed to call the Importer API from outside (scripts, iOS Shortcuts):
     # ports:
     #   - "8081:8081"

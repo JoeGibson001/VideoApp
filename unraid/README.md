@@ -24,10 +24,23 @@ mkdir -p /mnt/user/appdata/tastebud /mnt/user/media/tastebud
 
 ## 3. Create the stack
 
-Docker tab > Compose > **Add New Stack** > name it `tastebud`.
+Docker tab > Compose > **Add New Stack**. In the *Add New Compose Stack* dialog:
 
-- Stack settings (gear icon) > **Edit Stack** > **Compose File**: paste the contents of [`docker-compose.yml`](docker-compose.yml) and save.
-- **Edit Stack** > **Env File**: paste [`.env.example`](.env.example), then fill in the four secrets. Generate each one in the terminal:
+| Field | Value |
+|---|---|
+| Stack Name | `Tastebud` |
+| Description | optional, e.g. `Swipe video feed` |
+| Compose Source | **Project folder** (the default; the plugin creates the folder) |
+| External ENV File Path | leave empty (uses the `.env` in the project folder) |
+| Compose File Discovery | leave as it is |
+| Override File Management | **Automatic** (the default) |
+
+Click **Create**. Do not use the *Git repository* source: the compose file sits in a subfolder of the repo, and your secrets must not live in git.
+
+Then open the new stack's editor (click the stack, or its gear menu > **Edit Stack**):
+
+- **Compose file**: replace the contents with [`docker-compose.yml`](docker-compose.yml) and save.
+- **ENV / .env file**: paste [`.env.example`](.env.example), then fill in the four secrets. Generate each one in the terminal:
 
   ```sh
   openssl rand -hex 32
@@ -88,4 +101,5 @@ Docker tab > Compose > **Update Stack** (or **Compose Pull** then **Compose Up**
 
 - Files are written as user/group 1000. Everything works; if you browse the media share over SMB and want to delete files by hand, you may need to adjust permissions (Tools > New Permissions on that share).
 - Optional site cookies for yt-dlp: put `cookies.txt` in `appdata/tastebud/importer/`.
+- Proxy: set `PROXY_URL` in the env file (for example `socks5://user:pass@192.168.1.20:1080`, or a gluetun or privoxy container on the same Docker network) and Compose Up. All of the importer's internet traffic then goes through it. A firewall inside the container blocks every direct connection, and the container will not start if the proxy settings or firewall cannot be applied. Admin > Import shows "All traffic via proxy ..." when it is active. Details: [importer/README.md](../importer/README.md#proxy).
 - The importer API port (8081) is not exposed. Uncomment its `ports:` lines if you want to call it from scripts or iOS Shortcuts.

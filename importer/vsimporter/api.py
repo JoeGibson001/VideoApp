@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import os
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any, Literal
@@ -14,6 +15,7 @@ from sqlalchemy import select
 
 from .config import IMPORTER_VERSION
 from .jobs import Conflict
+from .proxy import masked as masked_proxy
 from .models import JOB_STATUSES, Job, Watch, WatchItem, WatchRun
 from .service import Importer
 from .ui import INDEX_HTML
@@ -151,6 +153,11 @@ def create_app(svc: Importer, *, background: bool = True) -> FastAPI:
             "status": "ok",
             "version": IMPORTER_VERSION,
             "yt_dlp_version": await s.adapters.ytdlp.version(),
+            "proxy": {
+                "enabled": bool(s.settings.proxy),
+                "url": masked_proxy(s.settings.proxy),
+                "firewall": os.environ.get("TASTEBUD_FIREWALL") == "active",
+            },
             "jobs": {k: counts.get(k, 0) for k in JOB_STATUSES},
         }
 

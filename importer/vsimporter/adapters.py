@@ -17,6 +17,7 @@ from typing import Awaitable, Callable, Protocol
 import httpx
 
 from .config import Settings
+from .proxy import subprocess_env
 
 log = logging.getLogger("vsimporter.adapters")
 
@@ -88,10 +89,11 @@ async def run_process(
     on_stdout_line: Callable[[str], Awaitable[None] | None] | None = None,
     timeout: float | None = None,
     tail_lines: int = 30,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
     """Run a process, returning (returncode, stdout, stderr_tail). Kills it on cancel/timeout."""
     proc = await asyncio.create_subprocess_exec(
-        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=64 * 1024 * 1024
+        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=64 * 1024 * 1024, env=env
     )
     out_chunks: list[str] = []
     err_tail: deque[str] = deque(maxlen=tail_lines)
@@ -143,12 +145,19 @@ class RealYtDlp:
         cookies = self.s.cookies_path
         if cookies:
             args += ["--cookies", str(cookies)]
+        if self.s.proxy:
+            # Native downloaders only: ffmpeg would fetch HLS/DASH itself and cannot use SOCKS proxies.
+            args += ["--proxy", self.s.proxy, "--downloader", "native"]
         return args
+
+    @property
+    def _env(self) -> dict[str, str] | None:
+        return subprocess_env(self.s.proxy)
 
     async def version(self) -> str:
         if self._version is None:
             try:
-                code, out, _ = await run_process([self.s.ytdlp_bin, "--version"], timeout=60)
+                code, out, _ = await run_process([self.s.ytdlp_bin, "--version"], timeout=60, env=self._env)
                 self._version = out.strip() if code == 0 else "unknown"
             except Exception:  # noqa: BLE001
                 self._version = "unknown"
@@ -164,7 +173,7 @@ class RealYtDlp:
         if no_playlist:
             args.append("--no-playlist")
         args += ["--", url]
-        code, out, err = await run_process(args, timeout=600)
+        code, out, err = await run_process(args, timeout=600, env=self._env)
         if code != 0 or not out.strip():
             from .mapping import last_error_line
 
@@ -193,7 +202,7 @@ class RealYtDlp:
                 if asyncio.iscoroutine(r):
                     await r
 
-        code, _, err = await run_process(args, on_stdout_line=on_line, timeout=6 * 3600)
+        code, _, err = await run_process(args, on_stdout_line=on_line, timeout=6 * 3600, env=self._env)
         if code != 0:
             from .mapping import last_error_line
 
@@ -322,7 +331,10 @@ class RealMedia:
 class RealAppClient:
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
         self.s = settings
-        self.client = client or httpx.AsyncClient(base_url=settings.app_internal_url.rstrip("/"), timeout=60)
+        # Internal Docker traffic: never through the proxy, whatever the environment says.
+        self.client = client or httpx.AsyncClient(
+            base_url=settings.app_internal_url.rstrip("/"), timeout=60, trust_env=False
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"X-Ingest-Key": self.s.ingest_api_key}
@@ -365,9 +377,11 @@ class RealAppClient:
 class RealFetcher:
     MAX_BYTES = 20 * 1024 * 1024
 
-    def __init__(self, client: httpx.AsyncClient | None = None):
+    def __init__(self, client: httpx.AsyncClient | None = None, proxy: str | None = None):
+        # trust_env=False: only the configured proxy (or none) is used, never stray environment settings.
         self.client = client or httpx.AsyncClient(
-            timeout=30, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Tastebud importer)"}
+            timeout=30, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Tastebud importer)"},
+            proxy=proxy, trust_env=False,
         )
 
     async def fetch(self, url: str, dst: Path) -> bool:
@@ -393,5 +407,5 @@ def real_adapters(settings: Settings) -> Adapters:
         ytdlp=RealYtDlp(settings),
         media=RealMedia(settings),
         app=RealAppClient(settings),
-        fetcher=RealFetcher(),
+        fetcher=RealFetcher(proxy=settings.proxy),
     )

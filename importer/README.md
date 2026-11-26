@@ -53,9 +53,38 @@ the unprivileged `importer` user (uid/gid 1000) for the actual process.
 | `MAX_DURATION_MIN` | `240` | Longer videos fail with a clear message (0 = no limit). |
 | `YTDLP_AUTO_UPDATE` | `false` | `true` runs `pip install -U "yt-dlp[default]"` on every container start. |
 | `YTDLP_COOKIES_FILE` | `/data/cookies.txt` | Netscape cookies file, used only if it exists. |
+| `PROXY_URL` | (empty) | Send all internet traffic through this proxy: `http://`, `https://` or `socks5://[user:pass@]host:port`. See "Proxy" below. |
+| `PROXY_KILL_SWITCH` | `true` | With a proxy, firewall every other outgoing connection (needs `cap_add: [NET_ADMIN]`). |
 | `DATA_DIR` | `/data` | `jobs.db` and `tmp/` (download scratch space, wiped on start). |
 | `MEDIA_DIR` | `/media` | Shared media volume. |
 | `LOG_LEVEL` | `INFO` | |
+
+## Proxy
+
+With `PROXY_URL` set, nothing the importer fetches from the internet goes direct:
+
+- yt-dlp runs with `--proxy` and `--downloader native` (ffmpeg never downloads anything itself), plus
+  the proxy environment variables for the JavaScript runtime it starts.
+- Thumbnails and avatars use an HTTP client bound to the proxy.
+- The yt-dlp update at start (`YTDLP_AUTO_UPDATE`) runs `pip --proxy`.
+- `socks5://` is turned into `socks5h://`, so site names are resolved by the proxy, not by local DNS.
+- **Kill switch.** Before dropping root, the entrypoint sets iptables rules inside the container's
+  own network namespace. Outgoing traffic may only go to:
+  - the proxy's address and port,
+  - loopback,
+  - the container's own Docker networks (the App).
+
+  Everything else is rejected, IPv6 included. The importer then runs as uid 1000 without
+  capabilities, so it cannot change the rules. If the rules cannot be applied, or `PROXY_URL` is
+  invalid or its host cannot be resolved, the container stops rather than starting without them.
+  This needs `cap_add: [NET_ADMIN]` on the importer (both compose files have it).
+- Docker's internal DNS stays reachable so the importer can find the App by name. Tools never ask it
+  for video sites while the proxy is on.
+- The proxy's address is looked up once at start. If it is a container whose IP changes, restart
+  the importer.
+- `GET /api/health` reports `proxy.enabled`, `proxy.url` (without credentials) and
+  `proxy.firewall`. The App shows the same status under Admin > Import.
+- The App itself never contacts the internet; only the importer does.
 
 ## Updating yt-dlp
 

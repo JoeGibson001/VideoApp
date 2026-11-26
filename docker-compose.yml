@@ -23,6 +23,8 @@ services:
     image: tastebud-importer
     restart: unless-stopped
     ports: ["8081:8081"]        # optional: only needed to call the Importer API from outside
+    # Lets the entrypoint firewall everything except the proxy when PROXY_URL is set (dropped afterwards).
+    cap_add: [NET_ADMIN]
     env_file: .env
     environment:
       APP_INTERNAL_URL: ${APP_INTERNAL_URL:-http://app:8080}

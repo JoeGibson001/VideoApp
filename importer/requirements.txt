@@ -2,9 +2,11 @@ fastapi==0.115.6
 uvicorn==0.32.1
 sqlalchemy==2.0.36
 alembic==1.14.0
-httpx==0.28.1
+httpx[socks]==0.28.1
 pydantic==2.10.4
 pydantic-settings==2.7.0
 tzdata==2024.2
 yt-dlp[default]
 deno
+# SOCKS support for pip (yt-dlp self-update through a SOCKS proxy).
+PySocks==1.7.1
