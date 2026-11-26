@@ -1,0 +1,32 @@
+/* Admin-only extras (DESIGN.md 9). Base classes live in styles.css. */
+.admin-head-sub { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.admin-head-sub .searchbox { flex: 1; min-width: 180px; margin: 0; }
+.admin-head-sub select { width: auto; }
+.table tr.clickable { cursor: pointer; }
+.table tr.clickable:hover td { background: rgba(255, 255, 255, .03); }
+.table td.num, .table th.num { text-align: right; white-space: nowrap; }
+.table td.nowrap { white-space: nowrap; }
+.table td .sub { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; word-break: break-all; }
+.table td.title { min-width: 160px; }
+.table input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 12px 0; font-size: 13px; color: var(--dim); }
+.chips.edit .chip { background: var(--line); }
+.chips.edit .chip button { background: none; border: 0; color: inherit; padding: 0 0 0 4px; opacity: .7; min-height: 0; }
+.rowline { display: flex; gap: 8px; align-items: center; }
+.rowline > input, .rowline > select { flex: 1; }
+.rowline > .btn { flex: none; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 8px 0; }
+.stat { background: var(--panel2); border-radius: 10px; padding: 10px; }
+.stat b { display: block; font-size: 20px; }
+.stat small { color: var(--dim); font-size: 12px; }
+.warnrow td { background: rgba(245, 158, 11, .07); }
+.amber { color: var(--warn); }
+.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; min-width: 60px; }
+.progress > i { display: block; height: 100%; background: var(--accent); }
+.json { font-size: 13px; }
+.json ul { margin: 4px 0; padding-left: 18px; max-height: 240px; overflow-y: auto; word-break: break-all; }
+.admin-detail-head { display: flex; gap: 12px; align-items: center; margin: 8px 0; }
+.admin-detail-head h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status.queued { background: #1f2430; color: var(--muted); }
+.status.erroring { background: #2a2210; color: var(--warn); }
+.sticky-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 6px; }
