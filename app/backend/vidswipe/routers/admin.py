@@ -464,15 +464,38 @@ def patch_source(source_id: int, body: SourcePatch, db: Session = Depends(get_db
     s = _source_or_404(db, source_id)
     if body.name is not None and body.name.strip():
         s.name = body.name.strip()
+    creators_updated = 0
     if body.creator_url_template is not None:
-        s.creator_url_template = urls.validate_template(body.creator_url_template, urls.CREATOR_KEYS, s.domain,
-                                                        "creator")
+        old = s.creator_url_template
+        new = urls.validate_template(body.creator_url_template, urls.CREATOR_KEYS, s.domain, "creator")
+        if new != old:
+            s.creator_url_template = new
+            creators_updated = _retemplate_creators(db, s, old, new)
     if body.tag_url_template is not None:
         s.tag_url_template = urls.validate_template(body.tag_url_template, urls.TAG_KEYS, s.domain, "tag")
     db.commit()
     search_index.invalidate()
     importer_client.invalidate_watch_cache()
-    return _admin_source(db, s)
+    return {**_admin_source(db, s), "creators_updated": creators_updated}
+
+
+def _retemplate_creators(db: Session, s: Source, old: str | None, new: str | None) -> int:
+    """A changed creator URL template is applied to every existing creator of the source.
+
+    When the template is cleared, URLs that the old template produced are removed; URLs that
+    came from anywhere else are kept.
+    """
+    n = 0
+    for c in db.scalars(select(Creator).where(Creator.source_id == s.id)).unique():
+        if new:
+            url = urls.creator_url(new, s.domain, c.handle, c.name)
+        else:
+            was = urls.creator_url(old, s.domain, c.handle, c.name)
+            url = None if c.profile_url and c.profile_url == was else c.profile_url
+        if url != c.profile_url:
+            c.profile_url = url
+            n += 1
+    return n
 
 
 def _creator_url_changes(db: Session, s: Source, overwrite: bool) -> list[tuple[Creator, str]]:

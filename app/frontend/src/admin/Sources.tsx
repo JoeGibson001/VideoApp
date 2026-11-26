@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, get, patch, post, put } from '../api'
+import { api, get, patch, put } from '../api'
 import { Avatar, EmptyState, Spinner } from '../components/common'
 import { ChevronLeft, External, Search } from '../components/Icons'
 import { WatchIndicator, WatchSection } from '../components/WatchSection'
-import { useDebounced } from '../state'
+import { useDebounced, useToast } from '../state'
 import type { SourceRef, WatchStatus } from '../types'
 import { DangerDelete, ErrorBox, FileButton, Pager, uploadForm, useAction, useLoad } from './shared'
 
@@ -106,32 +106,28 @@ function GeneralCard({ source, onSaved }: { source: AdminSource; onSaved: (s: Ad
   )
 }
 
-interface UrlPreview { would_change: number; missing_url: number; examples: { id: number; name: string; handle: string; old: string | null; new: string }[] }
-
 function TemplatesCard({ source, onSaved }: { source: AdminSource; onSaved: (s: AdminSource) => void }) {
   const [creatorTpl, setCreatorTpl] = useState(source.creator_url_template || '')
   const [tagTpl, setTagTpl] = useState(source.tag_url_template || '')
-  const [overwrite, setOverwrite] = useState(false)
-  const [preview, setPreview] = useState<UrlPreview | null>(null)
   const act = useAction()
-  const dirty = creatorTpl !== (source.creator_url_template || '') || tagTpl !== (source.tag_url_template || '')
+  const toast = useToast()
+  const creatorChanged = creatorTpl.trim() !== (source.creator_url_template || '')
+  const dirty = creatorChanged || tagTpl.trim() !== (source.tag_url_template || '')
+  const n = source.creator_count
 
   const save = async () => {
-    const r = await act.run(() => patch<AdminSource>(`/api/admin/sources/${source.id}`,
-      { creator_url_template: creatorTpl, tag_url_template: tagTpl }), 'URL templates saved')
-    if (r) { onSaved(r); setPreview(null) }
-  }
-  const loadPreview = async (ow: boolean) => {
-    setOverwrite(ow)
-    const r = await act.run(() => get<UrlPreview>(`/api/admin/sources/${source.id}/creator-urls/preview`, { overwrite: ow || undefined }))
-    if (r) setPreview(r)
-  }
-  const apply = async () => {
-    if (!preview?.would_change) return
-    if (overwrite && !window.confirm(`Overwrite the profile URL of ${preview.would_change} creator(s)?`)) return
-    const r = await act.run(() => post<{ updated: number }>(`/api/admin/sources/${source.id}/creator-urls/apply`, { overwrite }),
-      `Updated ${preview.would_change} creator URL${preview.would_change === 1 ? '' : 's'}`)
-    if (r) setPreview(null)
+    if (creatorChanged && n > 0) {
+      const msg = creatorTpl.trim()
+        ? `This sets the profile URL of all ${n} creator${n === 1 ? '' : 's'} on ${source.name} from the new template, replacing their current URLs. Continue?`
+        : `Clear the template? Profile URLs it created on ${source.name} will be removed; URLs edited by hand are kept.`
+      if (!window.confirm(msg)) return
+    }
+    const r = await act.run(() => patch<AdminSource & { creators_updated: number }>(`/api/admin/sources/${source.id}`,
+      { creator_url_template: creatorTpl, tag_url_template: tagTpl }))
+    if (r) {
+      onSaved(r)
+      toast(r.creators_updated ? `Saved, ${r.creators_updated} creator URL${r.creators_updated === 1 ? '' : 's'} updated` : 'URL templates saved')
+    }
   }
 
   return (
@@ -142,7 +138,9 @@ function TemplatesCard({ source, onSaved }: { source: AdminSource; onSaved: (s: 
       </p>
       <label className="field">Creator profile URL
         <input type="text" value={creatorTpl} placeholder="/users/{handle}" onChange={(e) => setCreatorTpl(e.target.value)} />
-        <span style={{ display: 'block', fontSize: 12, marginTop: 4 }}>{CREATOR_HELP}</span>
+        <span style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+          {CREATOR_HELP} Saving a change applies it to all {n} existing creator{n === 1 ? '' : 's'} of this source, and new creators get it on import.
+        </span>
       </label>
       {source.example_creator_url && !dirty ? <div className="muted" style={{ fontSize: 12 }}>Example: {source.example_creator_url}</div> : null}
       <label className="field">Tag page URL
@@ -153,47 +151,6 @@ function TemplatesCard({ source, onSaved }: { source: AdminSource; onSaved: (s: 
       <div className="btnrow">
         <button className="btn primary" disabled={act.busy || !dirty} onClick={() => void save()}>Save templates</button>
       </div>
-
-      {source.creator_url_template && !dirty ? (
-        <>
-          <div className="section-title">Creator profile URLs</div>
-          <p className="muted" style={{ fontSize: 13, margin: '0 0 8px' }}>
-            New creators from this source get the template URL automatically when yt-dlp gives none. Apply it to existing creators:
-          </p>
-          <div className="btnrow">
-            <button className="btn small" disabled={act.busy} onClick={() => void loadPreview(false)}>Preview: fill missing URLs</button>
-            <button className="btn small" disabled={act.busy} onClick={() => void loadPreview(true)}>Preview: overwrite all</button>
-          </div>
-          {preview ? (
-            <div className="card" style={{ background: 'var(--panel2)' }}>
-              <div>
-                {preview.would_change} creator{preview.would_change === 1 ? '' : 's'} would change
-                ({preview.missing_url} currently ha{preview.missing_url === 1 ? 's' : 've'} no URL).
-              </div>
-              {preview.examples.length ? (
-                <div className="table-wrap" style={{ marginTop: 6 }}>
-                  <table className="table">
-                    <thead><tr><th>Creator</th><th>New URL</th></tr></thead>
-                    <tbody>
-                      {preview.examples.map((x) => (
-                        <tr key={x.id}>
-                          <td className="title">{x.name}<span className="sub">{x.handle}{x.old ? ` - was ${x.old}` : ''}</span></td>
-                          <td style={{ wordBreak: 'break-all' }}>{x.new}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-              <div className="btnrow">
-                <button className="btn" onClick={() => setPreview(null)}>Cancel</button>
-                <button className={'btn ' + (overwrite ? 'danger' : 'primary')} disabled={act.busy || !preview.would_change}
-                  onClick={() => void apply()}>{overwrite ? 'Overwrite' : 'Fill in'} {preview.would_change} URL{preview.would_change === 1 ? '' : 's'}</button>
-              </div>
-            </div>
-          ) : null}
-        </>
-      ) : null}
       <ErrorBox error={act.error} />
     </div>
   )

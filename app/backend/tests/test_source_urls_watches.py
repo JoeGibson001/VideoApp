@@ -91,22 +91,33 @@ def test_template_validation(admin):
 def test_apply_creator_urls_and_ingest_uses_template(admin):
     a = _ingest_raw(admin, _payload_no_url(domain="example.com", creator="alice"))
     _ingest_raw(admin, make_payload(domain="example.com", creator="bob"))  # has its own profile URL
+    other = _ingest_raw(admin, make_payload(domain="other.com", creator="zed"))
     sid = source_id(admin, a)
-    assert admin.get(f"/api/admin/sources/{sid}/creator-urls/preview").status_code == 400  # no template yet
-    admin.patch(f"/api/admin/sources/{sid}", json={"creator_url_template": "/users/{handle}"})
-    prev = admin.get(f"/api/admin/sources/{sid}/creator-urls/preview").json()
-    assert prev["would_change"] == 1 and prev["missing_url"] == 1
-    assert prev["examples"][0]["new"] == "https://example.com/users/alice"
-    assert admin.get(f"/api/admin/sources/{sid}/creator-urls/preview", params={"overwrite": True}).json()[
-        "would_change"] == 2
-    assert admin.post(f"/api/admin/sources/{sid}/creator-urls/apply", json={}).json()["updated"] == 1
-    creators = {c["handle"]: c["profile_url"] for c in admin.get("/api/admin/creators").json()["items"]}
-    assert creators["alice"] == "https://example.com/users/alice"
-    assert creators["bob"] == "https://example.com/@bob"
-    # new creators from this source get the template URL at ingest
-    c = _ingest_raw(admin, _payload_no_url(domain="example.com", creator="@carol"))
+
+    def urls_now():
+        return {c["handle"]: c["profile_url"] for c in admin.get("/api/admin/creators").json()["items"]}
+
+    # saving a template applies it to every existing creator of the source, own URLs included
+    r = admin.patch(f"/api/admin/sources/{sid}", json={"creator_url_template": "/users/{handle}"}).json()
+    assert r["creators_updated"] == 2
+    assert urls_now() == {"alice": "https://example.com/users/alice", "bob": "https://example.com/users/bob",
+                          "zed": "https://other.com/@zed"}  # other sources untouched
+    # changing it re-applies; saving the same template again changes nothing
+    r = admin.patch(f"/api/admin/sources/{sid}", json={"creator_url_template": "/u/{handle_bare}"}).json()
+    assert r["creators_updated"] == 2 and urls_now()["bob"] == "https://example.com/u/bob"
+    assert admin.patch(f"/api/admin/sources/{sid}", json={"creator_url_template": "/u/{handle_bare}"}).json()[
+        "creators_updated"] == 0
+    # new creators follow the template at ingest, even when yt-dlp reports a URL
+    c = _ingest_raw(admin, make_payload(domain="example.com", creator="@carol"))
     cid = admin.get(f"/api/videos/{c}").json()["creator"]["id"]
-    assert admin.get(f"/api/creators/{cid}").json()["profile_url"] == "https://example.com/users/@carol"
+    assert admin.get(f"/api/creators/{cid}").json()["profile_url"] == "https://example.com/u/carol"
+    # clearing removes the URLs the template made, but keeps ones edited by hand
+    admin.patch(f"/api/admin/creators/{cid}", json={"profile_url": "https://example.com/custom/carol"})
+    r = admin.patch(f"/api/admin/sources/{sid}", json={"creator_url_template": ""}).json()
+    assert r["creators_updated"] == 2
+    assert urls_now() == {"alice": None, "bob": None, "@carol": "https://example.com/custom/carol",
+                          "zed": "https://other.com/@zed"}
+    assert other
 
 
 def test_source_tag_list_and_custom_urls(admin, fake):
