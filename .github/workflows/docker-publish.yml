@@ -93,6 +93,10 @@ jobs:
           target: ${{ matrix.target }}
           platforms: linux/amd64
           push: true
+          # Plain single-platform manifests. With attestations the tag becomes an OCI index, and
+          # Unraid's update check compares the wrong digest and reports "update available" forever.
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           no-cache: ${{ github.event_name == 'schedule' }}
