@@ -156,3 +156,60 @@ def test_delete_endpoints_admin_only(client):
     for path in ["/api/admin/sources/1", "/api/admin/creators/1", "/api/admin/tags/1"]:
         assert client.delete(path).status_code == 403
     assert client.post("/api/admin/cleanup", json={}).status_code == 403
+
+
+def _touch(env, rel):
+    f = env["media"] / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(b"x")
+    return f
+
+
+def test_delete_source_removes_its_media_folders(admin, env):
+    media_files(env, "yt1")
+    stray = _touch(env, "avatars/youtube.com/someone-not-in-db.jpg")
+    nested = _touch(env, "videos/youtube.com/sub/extra.mp4")
+    keep = _touch(env, "videos/vimeo.com/other.mp4")
+    a = ingest(admin, vid="yt1")
+    ingest(admin, domain="vimeo.com")
+    r = admin.delete(f"/api/admin/sources/{source_of(admin, a)}").json()
+    assert r["folders_removed"] == 2  # posters/metadata were already pruned with their last file
+    assert r["leftover_files_removed"] == 2 and not stray.exists() and not nested.exists()
+    for root in ("videos", "posters", "avatars", "metadata"):
+        assert not (env["media"] / root / "youtube.com").exists()
+        assert (env["media"] / root).is_dir()  # top-level folders always stay
+    assert keep.exists()
+
+
+def test_deleting_last_file_prunes_empty_folder(admin, env):
+    media_files(env, "yt1")
+    media_files(env, "yt2")
+    a = ingest(admin, vid="yt1", creator="alice")
+    b = ingest(admin, vid="yt2", creator="bob")
+    admin.delete(f"/api/admin/videos/{a}")
+    assert (env["media"] / "videos" / "youtube.com").is_dir()  # yt2 still there
+    admin.delete(f"/api/admin/creators/{creator_of(admin, b)}")
+    for root in ("videos", "posters", "metadata"):
+        assert not (env["media"] / root / "youtube.com").exists()
+        assert (env["media"] / root).is_dir()
+
+
+def test_cleanup_prunes_only_empty_source_folders(admin, env):
+    a = ingest(admin, domain="vimeo.com", creator="solo")
+    (env["media"] / "posters" / "vimeo.com").mkdir(parents=True)
+    stray = _touch(env, "avatars/vimeo.com/keep-me.jpg")
+    admin.delete(f"/api/admin/videos/{a}")
+    assert admin.post("/api/admin/cleanup", json={}).json()["sources_deleted"] == 1
+    assert not (env["media"] / "posters" / "vimeo.com").exists()
+    assert stray.exists()
+
+
+def test_prune_never_escapes_media_root(env):
+    from vidswipe.routers.media import prune_empty_dirs
+
+    outside = env["media"].parent / "outside" / "x"
+    outside.mkdir(parents=True)
+    assert prune_empty_dirs(outside) == 0 and outside.exists()
+    top = env["media"] / "videos"
+    top.mkdir(exist_ok=True)
+    assert prune_empty_dirs(top) == 0 and top.exists()

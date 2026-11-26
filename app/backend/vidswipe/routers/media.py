@@ -80,6 +80,10 @@ def serve_media(rel: str, request: Request):
 
 
 def delete_media_file(rel: str | None) -> None:
+    """Delete one media file, then remove any folders it leaves empty.
+
+    Pruning stops at the top-level folders (videos/, posters/, ...), which always stay.
+    """
     if not rel:
         return
     base = get_settings().media_dir.resolve()
@@ -90,3 +94,61 @@ def delete_media_file(rel: str | None) -> None:
         return
     if target.is_file():
         os.remove(target)
+    prune_empty_dirs(target.parent)
+
+
+def prune_empty_dirs(start: Path) -> int:
+    """Remove `start` and its parents while they are empty, never a top-level media folder."""
+    base = get_settings().media_dir.resolve()
+    removed = 0
+    d = start.resolve()
+    while True:
+        try:
+            rel = d.relative_to(base)
+        except ValueError:
+            break
+        if len(rel.parts) < 2:  # media root or a top-level folder such as videos/
+            break
+        try:
+            d.rmdir()  # only succeeds when empty
+        except OSError:
+            break
+        removed += 1
+        d = d.parent
+    return removed
+
+
+MEDIA_ROOTS = ("videos", "posters", "avatars", "metadata")
+
+
+def remove_domain_dirs(domain: str) -> dict:
+    """Delete <root>/<domain>/ under each media folder, including any files still in them.
+
+    Used when a whole source is deleted: everything under its domain folders belonged to it.
+    """
+    base = get_settings().media_dir.resolve()
+    out = {"folders_removed": 0, "leftover_files_removed": 0}
+    if not domain or "/" in domain or "\\" in domain or domain in (".", "..") or domain.startswith("."):
+        return out
+    for root in MEDIA_ROOTS:
+        d = (base / root / domain).resolve()
+        if d.parent != (base / root).resolve() or not d.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(d, topdown=False):
+            for f in filenames:
+                try:
+                    os.remove(os.path.join(dirpath, f))
+                    out["leftover_files_removed"] += 1
+                except OSError:
+                    pass
+            for sub in dirnames:
+                try:
+                    os.rmdir(os.path.join(dirpath, sub))
+                except OSError:
+                    pass
+        try:
+            d.rmdir()
+            out["folders_removed"] += 1
+        except OSError:
+            pass
+    return out

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import CategoryItem, Creator, CreatorAlias, Source, Tag, Video, VideoTag
-from ..routers.media import delete_media_file
+from ..routers.media import MEDIA_ROOTS, delete_media_file, prune_empty_dirs, remove_domain_dirs
 from . import search_index
 from .ingest import attach_tags, ingest, iter_sidecars, payload_from_sidecar, read_sidecar
 from .ratings import recompute_all, recompute_creators, recompute_sources, recompute_tags
@@ -129,11 +129,15 @@ def delete_source(db: Session, source_id: int) -> dict:
     _delete_category_items(db, "source", [source_id])
     if src.icon_path:
         files.append(src.icon_path)
+    domain = src.domain
     db.delete(src)
     db.commit()
     _remove_files(files)
+    # Everything under videos/<domain>/, posters/<domain>/, ... belonged to this source:
+    # remove those folders, including stray files the database did not know about.
+    dirs = remove_domain_dirs(domain)
     search_index.invalidate()
-    return {**res, "creators_deleted": len(creator_ids), "sources_deleted": 1}
+    return {**res, **dirs, "creators_deleted": len(creator_ids), "sources_deleted": 1}
 
 
 def delete_creator(db: Session, creator_id: int) -> dict:
@@ -210,6 +214,10 @@ def cleanup_empty(db: Session, types: set[str] | None = None) -> dict:
                 files.append(src.icon_path)
             db.delete(src)
             removed_sources.append(s)
+            for root in MEDIA_ROOTS:  # only empty folders here; stray files are left alone
+                d = get_settings().media_dir / root / s["domain"]
+                if s["domain"] and "/" not in s["domain"] and not s["domain"].startswith(".") and d.is_dir():
+                    prune_empty_dirs(d)
     db.commit()
     _remove_files(files)
     search_index.invalidate()
