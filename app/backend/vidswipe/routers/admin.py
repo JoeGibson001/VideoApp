@@ -548,6 +548,24 @@ def retry_import(job_id: int):
     return importer_client.request("POST", f"/api/imports/{job_id}/retry")
 
 
+@router.delete("/imports/{job_id}/record")
+def delete_import_record(job_id: int):
+    """Remove a finished job from the import history (imported videos are kept)."""
+    return importer_client.request("DELETE", f"/api/imports/{job_id}/record")
+
+
+class ClearImportsIn(BaseModel):
+    ids: list[int] | None = None
+    statuses: list[str] | None = None
+    older_than_days: int | None = None
+
+
+@router.post("/imports/clear")
+def clear_imports(body: ClearImportsIn):
+    """Bulk-remove finished jobs from the import history."""
+    return importer_client.request("POST", "/api/imports/clear", json=body.model_dump(exclude_none=True))
+
+
 @router.delete("/imports/{job_id}")
 def cancel_import(job_id: int):
     return importer_client.request("DELETE", f"/api/imports/{job_id}")

@@ -145,3 +145,63 @@ def test_workers_process_jobs_in_background(svc, fakes):
                 break
             time.sleep(0.05)
         assert status == "done"
+
+
+def test_delete_import_records(client, svc, fakes):
+    for v in ("d1", "d2"):
+        fakes.ytdlp.add_video(yt_video(v))
+    ids = client.post("/api/imports/batch", headers=H, json={"urls": [
+        "https://www.youtube.com/watch?v=d1", "https://www.youtube.com/watch?v=d2",
+        "https://www.youtube.com/watch?v=missing"]}).json()["job_ids"]
+    drain(client, svc)
+    statuses = {j["id"]: j["status"] for j in client.get("/api/imports", headers=H).json()}
+    assert statuses[ids[0]] == "done" and statuses[ids[2]] == "failed"
+
+    # single delete of a finished job
+    r = client.delete(f"/api/imports/{ids[0]}/record", headers=H)
+    assert r.status_code == 200 and r.json()["deleted"] == 1
+    assert client.get(f"/api/imports/{ids[0]}", headers=H).status_code == 404
+    assert client.delete(f"/api/imports/{ids[0]}/record", headers=H).status_code == 404
+
+    # unfinished jobs are protected
+    q = client.post("/api/imports", headers=H, json={"url": "https://www.youtube.com/watch?v=later"}).json()["job_id"]
+    assert client.delete(f"/api/imports/{q}/record", headers=H).status_code == 409
+    r = client.post("/api/imports/clear", headers=H, json={}).json()
+    assert q not in r["job_ids"] and set(r["job_ids"]) == {ids[1], ids[2]}
+    assert [j["id"] for j in client.get("/api/imports", headers=H).json()] == [q]
+
+
+def test_clear_import_records_by_status_and_age(client, svc, fakes, clock):
+    fakes.ytdlp.add_video(yt_video("c1"))
+    ids = client.post("/api/imports/batch", headers=H, json={"urls": [
+        "https://www.youtube.com/watch?v=c1", "https://www.youtube.com/watch?v=nope"]}).json()["job_ids"]
+    drain(client, svc)
+    assert client.post("/api/imports/clear", headers=H, json={"older_than_days": 1}).json()["deleted"] == 0
+    r = client.post("/api/imports/clear", headers=H, json={"statuses": ["failed"]}).json()
+    assert r["job_ids"] == [ids[1]]
+    assert client.post("/api/imports/clear", headers=H, json={"statuses": ["queued"]}).status_code == 422
+    assert [j["id"] for j in client.get("/api/imports", headers=H).json()] == [ids[0]]
+
+
+def test_deleting_watch_job_record_keeps_watch_item(client, svc, fakes):
+    from vsimporter.models import Job, WatchItem
+
+    fakes.ytdlp.add_video(yt_video("w1"))
+    with svc.Session() as s:
+        from vsimporter.models import Watch
+
+        w = Watch(url="https://www.youtube.com/@x", normalized_url="youtube.com/@x", kind="channel", name="x",
+                  source_domain="youtube.com",
+                  enabled=True, tags=[], filters={}, initial_mode="new_only")
+        s.add(w)
+        s.flush()
+        job = Job(url="https://www.youtube.com/watch?v=w1", status="done", tags=[], watch_id=w.id)
+        s.add(job)
+        s.flush()
+        s.add(WatchItem(watch_id=w.id, source_video_id="w1", status="imported", job_id=job.id))
+        s.commit()
+        job_id = job.id
+    assert client.delete(f"/api/imports/{job_id}/record", headers=H).status_code == 200
+    with svc.Session() as s:
+        item = s.scalars(__import__("sqlalchemy").select(WatchItem)).one()
+        assert item.status == "imported" and item.job_id is None

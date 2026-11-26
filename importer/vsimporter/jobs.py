@@ -216,6 +216,45 @@ class JobQueue:
         with self.svc.Session() as s:
             return s.get(Job, job_id)
 
+    FINISHED = ("done", "failed", "skipped")
+
+    def delete_records(self, job_ids: list[int] | None = None, statuses: list[str] | None = None,
+                       older_than_days: int | None = None, strict: bool = False) -> list[int]:
+        """Remove finished jobs from the history. Queued or running jobs are never touched.
+
+        Only the job rows go: imported videos stay in the App, and watch items keep their status
+        (that is what stops a watch re-importing), with their job link cleared.
+        With strict, asking to delete an unfinished job raises Conflict.
+        """
+        from .models import WatchItem
+
+        statuses = [st for st in (statuses or self.FINISHED) if st in self.FINISHED]
+        with self.svc.Session() as s:
+            q = select(Job).where(Job.status.in_(statuses))
+            if job_ids is not None:
+                if strict:
+                    for job in s.scalars(select(Job).where(Job.id.in_(job_ids))):
+                        if job.status not in self.FINISHED:
+                            raise Conflict(f"Job {job.id} is {job.status}; cancel it first")
+                q = q.where(Job.id.in_(job_ids))
+            if older_than_days is not None:
+                from datetime import timedelta
+
+                cutoff = self.svc.now() - timedelta(days=older_than_days)
+                q = q.where(func.coalesce(Job.finished_at, Job.created_at) < cutoff)
+            ids = list(s.scalars(q.with_only_columns(Job.id)))
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                for item in s.scalars(select(WatchItem).where(WatchItem.job_id.in_(chunk))):
+                    item.job_id = None
+                for job in s.scalars(select(Job).where(Job.parent_id.in_(chunk))):
+                    job.parent_id = None
+                s.execute(Job.__table__.delete().where(Job.id.in_(chunk)))
+            s.commit()
+        if ids:
+            log.info("job records deleted", extra={"count": len(ids)})
+        return ids
+
     def retry(self, job_id: int) -> Job | None:
         with self.svc.Session() as s:
             job = s.get(Job, job_id)

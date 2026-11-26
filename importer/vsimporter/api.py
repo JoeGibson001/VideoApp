@@ -41,6 +41,14 @@ class ImportIn(BaseModel):
         return _check_url(v)
 
 
+class ClearIn(BaseModel):
+    """Which finished jobs to remove from the history. All filters are optional and combine."""
+
+    ids: list[int] | None = None
+    statuses: list[Literal["done", "failed", "skipped"]] | None = None
+    older_than_days: int | None = Field(default=None, ge=0)
+
+
 class BatchIn(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=1000)
     tags: list[str] = Field(default_factory=list)
@@ -210,6 +218,25 @@ def create_app(svc: Importer, *, background: bool = True) -> FastAPI:
             raise HTTPException(404, "Job not found")
         with s.Session() as db:
             return s.jobs.serialize(db, [db.get(Job, job_id)])[0]
+
+    @r.delete("/imports/{job_id}/record")
+    async def delete_import_record(job_id: int, request: Request) -> dict:
+        """Remove one finished job from the history (409 if it is queued or running)."""
+        s = svc_of(request)
+        with s.Session() as db:
+            _job_or_404(db, job_id)
+        try:
+            ids = s.jobs.delete_records([job_id], strict=True)
+        except Conflict as e:
+            raise HTTPException(409, str(e)) from e
+        return {"deleted": len(ids), "job_ids": ids}
+
+    @r.post("/imports/clear")
+    async def clear_imports(body: ClearIn, request: Request) -> dict:
+        """Bulk-remove finished jobs from the history, filtered by ids, status and/or age."""
+        s = svc_of(request)
+        ids = s.jobs.delete_records(body.ids, body.statuses, body.older_than_days)
+        return {"deleted": len(ids), "job_ids": ids}
 
     @r.delete("/imports/{job_id}")
     async def cancel_import(job_id: int, request: Request) -> dict:

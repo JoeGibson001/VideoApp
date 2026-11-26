@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { del, get, post } from '../api'
 import { EmptyState, Spinner, formatDateTime } from '../components/common'
+import { Trash } from '../components/Icons'
 import { ErrorBox, errText, isOffline, listOf, useAction, useLoad } from './shared'
 
 export interface ImportJob {
@@ -111,15 +112,24 @@ export default function Import() {
   )
 }
 
+const FINISHED = new Set(['done', 'failed', 'skipped'])
+
 export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: () => void }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<number | null>(null)
-  const act = async (j: ImportJob, kind: 'retry' | 'cancel') => {
+  const [selected, setSelected] = useState<number[]>([])
+  const finishedIds = jobs.filter((j) => FINISHED.has(j.status)).map((j) => j.id)
+  const sel = selected.filter((id) => finishedIds.includes(id))
+  const allSelected = finishedIds.length > 0 && sel.length === finishedIds.length
+  const toggle = (id: number) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+
+  const act = async (j: ImportJob, kind: 'retry' | 'cancel' | 'delete') => {
     setBusy(j.id)
     setErr('')
     try {
       if (kind === 'retry') await post(`/api/admin/imports/${j.id}/retry`)
-      else await del(`/api/admin/imports/${j.id}`)
+      else if (kind === 'cancel') await del(`/api/admin/imports/${j.id}`)
+      else await del(`/api/admin/imports/${j.id}/record`)
       onChanged()
     } catch (e) {
       setErr(errText(e))
@@ -127,15 +137,42 @@ export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: ()
       setBusy(null)
     }
   }
+  const deleteSelected = async () => {
+    if (!sel.length || !window.confirm(`Remove ${sel.length} job${sel.length === 1 ? '' : 's'} from the history? Imported videos are kept.`)) return
+    setErr('')
+    try {
+      await post('/api/admin/imports/clear', { ids: sel })
+      setSelected([])
+      onChanged()
+    } catch (e) { setErr(errText(e)) }
+  }
+
   return (
     <>
+      <ClearHistory onCleared={onChanged} />
       <ErrorBox error={err} />
+      {sel.length ? (
+        <div className="btnrow" style={{ alignItems: 'center' }}>
+          <span className="muted" style={{ flex: 'none' }}>{sel.length} selected</span>
+          <button className="btn small danger" style={{ flex: 'none' }} onClick={() => void deleteSelected()}>Delete selected</button>
+          <button className="btn small" style={{ flex: 'none' }} onClick={() => setSelected([])}>Clear selection</button>
+        </div>
+      ) : null}
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Status</th><th>Item</th><th>Created</th><th></th></tr></thead>
+          <thead><tr>
+            <th><input type="checkbox" aria-label="Select all finished jobs" checked={allSelected} disabled={!finishedIds.length}
+              onChange={(e) => setSelected(e.target.checked ? finishedIds : [])} /></th>
+            <th>Status</th><th>Item</th><th>Created</th><th></th>
+          </tr></thead>
           <tbody>
             {jobs.map((j) => (
               <tr key={j.id}>
+                <td>
+                  {FINISHED.has(j.status) ? (
+                    <input type="checkbox" aria-label={`Select job ${j.id}`} checked={sel.includes(j.id)} onChange={() => toggle(j.id)} />
+                  ) : null}
+                </td>
                 <td className="nowrap">
                   <span className={`status ${j.status}`}>{j.status}</span>
                   {j.status === 'running' && j.progress != null ? (
@@ -158,6 +195,10 @@ export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: ()
                   {ACTIVE.has(j.status) ? (
                     <button className="btn small danger" disabled={busy === j.id} onClick={() => void act(j, 'cancel')}>Cancel</button>
                   ) : null}
+                  {FINISHED.has(j.status) ? (
+                    <button className="btn small" disabled={busy === j.id} aria-label={`Delete job ${j.id} from history`}
+                      title="Remove from history (the video is kept)" onClick={() => void act(j, 'delete')}><Trash size={14} /></button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -165,5 +206,43 @@ export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: ()
         </table>
       </div>
     </>
+  )
+}
+
+/** Bulk-remove finished jobs from the history by status and age. Queued/running jobs are never removed. */
+function ClearHistory({ onCleared }: { onCleared: () => void }) {
+  const [status, setStatus] = useState<'all' | 'done' | 'failed' | 'skipped'>('all')
+  const [age, setAge] = useState('')
+  const [msg, setMsg] = useState('')
+  const act = useAction()
+  const clear = async () => {
+    const what = status === 'all' ? 'all finished' : status
+    const when = age ? ` older than ${age} day${age === '1' ? '' : 's'}` : ''
+    if (!window.confirm(`Remove ${what} jobs${when} from the import history? Imported videos are kept.`)) return
+    const body: Record<string, unknown> = {}
+    if (status !== 'all') body.statuses = [status]
+    if (age) body.older_than_days = Number(age)
+    const r = await act.run(() => post<{ deleted: number }>('/api/admin/imports/clear', body))
+    if (r) { setMsg(`Removed ${r.deleted} job${r.deleted === 1 ? '' : 's'}`); onCleared() }
+  }
+  return (
+    <div className="rowline" style={{ flexWrap: 'wrap', gap: 8, margin: '4px 0 10px' }}>
+      <select value={status} aria-label="Which jobs to clear" style={{ width: 'auto', flex: 1 }}
+        onChange={(e) => setStatus(e.target.value as typeof status)}>
+        <option value="all">All finished jobs</option>
+        <option value="done">Done</option>
+        <option value="failed">Failed</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <select value={age} aria-label="Age" style={{ width: 'auto', flex: 1 }} onChange={(e) => setAge(e.target.value)}>
+        <option value="">Any age</option>
+        <option value="1">Older than 1 day</option>
+        <option value="7">Older than 7 days</option>
+        <option value="30">Older than 30 days</option>
+      </select>
+      <button className="btn small danger" disabled={act.busy} onClick={() => void clear()}>Clear history</button>
+      {msg ? <span className="muted" style={{ fontSize: 12 }}>{msg}</span> : null}
+      <ErrorBox error={act.error} />
+    </div>
   )
 }
