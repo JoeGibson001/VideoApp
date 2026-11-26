@@ -117,7 +117,16 @@ type Dialog = { kind: 'create' } | { kind: 'resume'; watch: Watch } | null
  * (asking import_missed vs only_new); On->Off pauses. Used on the admin creator page and the feed's
  * creator sheet.
  */
-export function WatchSection({ creatorId }: { creatorId: number }) {
+export function WatchSection({ creatorId, endpoint, defaultTags, description }: {
+  creatorId?: number
+  /** Any GET/POST watch-status endpoint with the creator contract, e.g. a source tag's. */
+  endpoint?: string
+  /** Prefilled "extra tags" in the create dialog. */
+  defaultTags?: string[]
+  /** Explains what URL gets watched, shown in the create dialog. */
+  description?: string
+}) {
+  const url = endpoint || `/api/admin/creators/${creatorId}/watch`
   const toast = useToast()
   const [status, setStatus] = useState<WatchStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -127,14 +136,14 @@ export function WatchSection({ creatorId }: { creatorId: number }) {
 
   const load = useCallback(async () => {
     try {
-      setStatus(await get<WatchStatus>(`/api/admin/creators/${creatorId}/watch`))
+      setStatus(await get<WatchStatus>(url))
       setError('')
     } catch (e) {
       setError(errorMessage(e))
     } finally {
       setLoading(false)
     }
-  }, [creatorId])
+  }, [url])
 
   useEffect(() => { setLoading(true); setDialog(null); void load() }, [load])
 
@@ -142,7 +151,7 @@ export function WatchSection({ creatorId }: { creatorId: number }) {
     setBusy(true)
     setError('')
     try {
-      setStatus(await post<WatchStatus>(`/api/admin/creators/${creatorId}/watch`, body))
+      setStatus(await post<WatchStatus>(url, body))
       setDialog(null)
       toast(ok)
     } catch (e) {
@@ -220,7 +229,7 @@ export function WatchSection({ creatorId }: { creatorId: number }) {
       ))}
 
       {dialog?.kind === 'create' ? (
-        <CreateDialog busy={busy} onCancel={() => setDialog(null)}
+        <CreateDialog busy={busy} onCancel={() => setDialog(null)} defaultTags={defaultTags} description={description}
           onCreate={(body) => void send({ enabled: true, ...body }, 'Watch created')} />
       ) : null}
     </div>
@@ -241,12 +250,13 @@ function ResumeDialog({ busy, onPick, onCancel }: { busy: boolean; onPick: (m: '
   )
 }
 
-function CreateDialog({ busy, onCreate, onCancel }: {
+function CreateDialog({ busy, onCreate, onCancel, defaultTags, description }: {
+  defaultTags?: string[]; description?: string
   busy: boolean; onCreate: (body: Record<string, unknown>) => void; onCancel: () => void
 }) {
   const [mode, setMode] = useState<'new_only' | 'backfill_latest'>('new_only')
   const [count, setCount] = useState('20')
-  const [tags, setTags] = useState('')
+  const [tags, setTags] = useState((defaultTags || []).join(', '))
   const [filters, setFilters] = useState<FilterDraft>(emptyDraft)
   const [more, setMore] = useState(false)
   const submit = () => {
@@ -257,7 +267,7 @@ function CreateDialog({ busy, onCreate, onCancel }: {
   return (
     <div className="card" style={{ background: 'var(--panel2)' }}>
       <b>Start watching</b>
-      <p className="muted" style={{ fontSize: 13, margin: '4px 0' }}>The creator's profile URL is checked once a day for new videos.</p>
+      <p className="muted" style={{ fontSize: 13, margin: '4px 0' }}>{description || "The creator's profile URL is checked once a day for new videos."}</p>
       <label className="check">
         <input type="radio" name="initial_mode" checked={mode === 'new_only'} onChange={() => setMode('new_only')} />
         Only videos posted from now on

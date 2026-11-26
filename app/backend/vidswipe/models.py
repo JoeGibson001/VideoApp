@@ -48,6 +48,35 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(255))
     domain: Mapped[str] = mapped_column(String(255), unique=True)
     icon_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # URL templates for sites where yt-dlp gives no URL. Relative paths are resolved against
+    # https://<domain>. Placeholders: see services/urls.py.
+    creator_url_template: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    tag_url_template: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class SourceTag(Base):
+    """Per-source settings for a tag: a custom URL overriding the source's tag URL template."""
+
+    __tablename__ = "source_tags"
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True)
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+    url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+
+class WatchLink(Base):
+    """Which creator or source tag an Importer watch was created for from the App.
+
+    The Importer only guesses creator links from the URL, so the App keeps its own record.
+    """
+
+    __tablename__ = "watch_links"
+    watch_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # creator | source_tag
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id", ondelete="CASCADE"), nullable=True,
+                                                   index=True)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), nullable=True)
+    tag_id: Mapped[int | None] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

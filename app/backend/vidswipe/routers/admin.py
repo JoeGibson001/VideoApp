@@ -15,14 +15,16 @@ from ..models import (
     CreatorAlias,
     MergeLog,
     Source,
+    SourceTag,
     Tag,
     TagAlias,
     User,
     Video,
     VideoTag,
+    WatchLink,
 )
 from ..security import require_admin
-from ..services import importer_client, maintenance, merge, search_index
+from ..services import importer_client, maintenance, merge, search_index, urls, watch_targets
 from ..services.ingest import attach_tags
 from ..services.ratings import recompute_all, recompute_creators, recompute_sources, recompute_tags
 from ..services.resolve import find_tag
@@ -276,30 +278,8 @@ def toggle_creator_watch(creator_id: int, body: WatchToggleIn, db: Session = Dep
     c = db.get(Creator, creator_id)
     if c is None:
         raise HTTPException(404)
-    status = creator_watch_status(db, c)
-    if status["state"] == "offline":
-        raise HTTPException(503, "Importer offline")
-    watches = status["watches"]
-    targets = [w for w in watches if body.watch_id is None or w["id"] == body.watch_id]
-    if body.enabled:
-        paused = [w for w in targets if not w.get("enabled")]
-        if paused:
-            for w in paused:
-                importer_client.request("PATCH", f"/api/watches/{w['id']}",
-                                        json={"enabled": True, "resume_mode": body.resume_mode})
-        elif not targets:
-            if not c.profile_url:
-                raise HTTPException(400, "Creator has no profile URL to watch")
-            payload = {"url": c.profile_url, "name": c.name, "tags": body.tags, "filters": body.filters,
-                       "initial_mode": body.initial_mode, "enabled": True}
-            if body.backfill_count:
-                payload["backfill_count"] = body.backfill_count
-            importer_client.request("POST", "/api/watches", json=payload)
-    else:
-        for w in targets:
-            if w.get("enabled"):
-                importer_client.request("PATCH", f"/api/watches/{w['id']}", json={"enabled": False})
-    importer_client.invalidate_watch_cache()
+    watch_targets.toggle(db, watch_targets.creator_watches(db, c), body, watch_targets.creator_watch_url(c), c.name,
+                         [], {"kind": "creator", "creator_id": c.id})
     return creator_watch_status(db, c)
 
 
@@ -441,26 +421,188 @@ def remove_alias(alias: str, split: bool = False, db: Session = Depends(get_db))
 
 # ---- sources ----------------------------------------------------------------------------------
 
+def _admin_source(db: Session, s: Source, counts: dict | None = None, creator_counts: dict | None = None) -> dict:
+    if counts is None:
+        counts = {s.id: db.scalar(select(func.count()).select_from(Video).where(Video.source_id == s.id))}
+    if creator_counts is None:
+        creator_counts = {s.id: db.scalar(select(func.count()).select_from(Creator).where(Creator.source_id == s.id))}
+    d = source_dict(s)
+    d.update(video_count=counts.get(s.id, 0), creator_count=creator_counts.get(s.id, 0),
+             creator_url_template=s.creator_url_template, tag_url_template=s.tag_url_template,
+             example_creator_url=urls.creator_url(s.creator_url_template, s.domain, "@example", "Example"),
+             example_tag_url=urls.tag_url(s.tag_url_template, s.domain, "example tag"))
+    return d
+
+
+def _source_or_404(db: Session, source_id: int) -> Source:
+    s = db.get(Source, source_id)
+    if s is None:
+        raise HTTPException(404, "Source not found")
+    return s
+
+
 @router.get("/sources")
 def admin_sources(db: Session = Depends(get_db)):
     counts = dict(db.execute(select(Video.source_id, func.count()).group_by(Video.source_id)).all())
-    return {"items": [dict(source_dict(s), video_count=counts.get(s.id, 0))
-                      for s in db.scalars(select(Source).order_by(Source.name))]}
+    ccounts = dict(db.execute(select(Creator.source_id, func.count()).group_by(Creator.source_id)).all())
+    return {"items": [_admin_source(db, s, counts, ccounts) for s in db.scalars(select(Source).order_by(Source.name))]}
+
+
+@router.get("/sources/{source_id}")
+def admin_source(source_id: int, db: Session = Depends(get_db)):
+    return _admin_source(db, _source_or_404(db, source_id))
 
 
 class SourcePatch(BaseModel):
-    name: str
+    name: str | None = None
+    creator_url_template: str | None = None  # "" clears
+    tag_url_template: str | None = None  # "" clears
 
 
 @router.patch("/sources/{source_id}")
 def patch_source(source_id: int, body: SourcePatch, db: Session = Depends(get_db)):
-    s = db.get(Source, source_id)
-    if s is None:
-        raise HTTPException(404)
-    s.name = body.name.strip() or s.name
+    s = _source_or_404(db, source_id)
+    if body.name is not None and body.name.strip():
+        s.name = body.name.strip()
+    if body.creator_url_template is not None:
+        s.creator_url_template = urls.validate_template(body.creator_url_template, urls.CREATOR_KEYS, s.domain,
+                                                        "creator")
+    if body.tag_url_template is not None:
+        s.tag_url_template = urls.validate_template(body.tag_url_template, urls.TAG_KEYS, s.domain, "tag")
     db.commit()
     search_index.invalidate()
-    return source_dict(s)
+    importer_client.invalidate_watch_cache()
+    return _admin_source(db, s)
+
+
+def _creator_url_changes(db: Session, s: Source, overwrite: bool) -> list[tuple[Creator, str]]:
+    if not s.creator_url_template:
+        raise HTTPException(400, "Set a creator URL template on this source first")
+    out = []
+    for c in db.scalars(select(Creator).where(Creator.source_id == s.id).order_by(func.lower(Creator.name))).unique():
+        if c.profile_url and not overwrite:
+            continue
+        new = urls.creator_url(s.creator_url_template, s.domain, c.handle, c.name)
+        if new and new != c.profile_url:
+            out.append((c, new))
+    return out
+
+
+@router.get("/sources/{source_id}/creator-urls/preview")
+def preview_creator_urls(source_id: int, overwrite: bool = False, db: Session = Depends(get_db)):
+    """What applying the creator URL template would change (missing URLs only, or all with overwrite)."""
+    s = _source_or_404(db, source_id)
+    changes = _creator_url_changes(db, s, overwrite)
+    missing = db.scalar(select(func.count()).select_from(Creator).where(
+        Creator.source_id == s.id, or_(Creator.profile_url.is_(None), Creator.profile_url == "")))
+    return {"would_change": len(changes), "missing_url": missing,
+            "examples": [{"id": c.id, "name": c.name, "handle": c.handle, "old": c.profile_url, "new": new}
+                         for c, new in changes[:10]]}
+
+
+class ApplyUrlsIn(BaseModel):
+    overwrite: bool = False
+
+
+@router.post("/sources/{source_id}/creator-urls/apply")
+def apply_creator_urls(source_id: int, body: ApplyUrlsIn, db: Session = Depends(get_db)):
+    s = _source_or_404(db, source_id)
+    changes = _creator_url_changes(db, s, body.overwrite)
+    for c, new in changes:
+        c.profile_url = new
+    db.commit()
+    importer_client.invalidate_watch_cache()
+    return {"updated": len(changes)}
+
+
+@router.get("/sources/{source_id}/tags")
+def source_tags(source_id: int, q: str = "", sort: str = "videos", page: int = Query(1, ge=1),
+                page_size: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    """Every tag used by videos from this source (plus tags with a custom URL or watch here)."""
+    s = _source_or_404(db, source_id)
+    counts = dict(db.execute(select(VideoTag.tag_id, func.count(func.distinct(Video.id)))
+                             .join(Video, Video.id == VideoTag.video_id)
+                             .where(Video.source_id == s.id).group_by(VideoTag.tag_id)).all())
+    overrides = {st.tag_id: st.url for st in db.scalars(select(SourceTag).where(SourceTag.source_id == s.id))}
+    links = list(db.scalars(select(WatchLink).where(WatchLink.kind == "source_tag", WatchLink.source_id == s.id)))
+    linked_tags = {lk.tag_id for lk in links}
+    ids = set(counts) | {k for k, v in overrides.items() if v} | linked_tags
+    tags = list(db.scalars(select(Tag).where(Tag.id.in_(ids)))) if ids else []
+    if q.strip():
+        nq = normalize_tag(q)
+        tags = [t for t in tags if nq in t.name]
+    if sort == "name":
+        tags.sort(key=lambda t: t.name)
+    else:
+        tags.sort(key=lambda t: (-counts.get(t.id, 0), t.name))
+    total = len(tags)
+    chunk = tags[(page - 1) * page_size: page * page_size]
+    all_w = importer_client.all_watches() if linked_tags else []
+    items = []
+    for t in chunk:
+        custom = overrides.get(t.id)
+        item = {"id": t.id, "name": t.name, "video_count": counts.get(t.id, 0), "custom_url": custom,
+                "url": custom or urls.tag_url(s.tag_url_template, s.domain, t.name)}
+        if t.id in linked_tags:
+            item["watch"] = watch_targets.summarize(
+                None if all_w is None else watch_targets.source_tag_watches(db, s.id, t.id, all_w))
+        else:
+            item["watch"] = {"state": "offline" if all_w is None else "none", "watches": []}
+        items.append(item)
+    return {"items": items, "total": total, "page": page, "page_size": page_size,
+            "tag_url_template": s.tag_url_template}
+
+
+class SourceTagUrlIn(BaseModel):
+    url: str | None = None  # null or "" clears the override (falls back to the template)
+
+
+@router.put("/sources/{source_id}/tags/{tag_id}")
+def set_source_tag_url(source_id: int, tag_id: int, body: SourceTagUrlIn, db: Session = Depends(get_db)):
+    s = _source_or_404(db, source_id)
+    t = db.get(Tag, tag_id)
+    if t is None:
+        raise HTTPException(404, "Tag not found")
+    url = urls.validate_url(body.url)
+    st = db.get(SourceTag, {"source_id": s.id, "tag_id": t.id})
+    if url:
+        if st is None:
+            db.add(SourceTag(source_id=s.id, tag_id=t.id, url=url))
+        else:
+            st.url = url
+    elif st is not None:
+        db.delete(st)
+    db.commit()
+    return {"id": t.id, "name": t.name, "custom_url": url, "url": watch_targets.source_tag_url(db, s, t)}
+
+
+def _source_tag(db: Session, source_id: int, tag_id: int) -> tuple[Source, Tag]:
+    s = _source_or_404(db, source_id)
+    t = db.get(Tag, tag_id)
+    if t is None:
+        raise HTTPException(404, "Tag not found")
+    return s, t
+
+
+@router.get("/sources/{source_id}/tags/{tag_id}/watch")
+def get_source_tag_watch(source_id: int, tag_id: int, db: Session = Depends(get_db)):
+    s, t = _source_tag(db, source_id, tag_id)
+    out = watch_targets.summarize(watch_targets.source_tag_watches(db, s.id, t.id))
+    out["url"] = watch_targets.source_tag_url(db, s, t)
+    return out
+
+
+@router.post("/sources/{source_id}/tags/{tag_id}/watch")
+def toggle_source_tag_watch(source_id: int, tag_id: int, body: WatchToggleIn, db: Session = Depends(get_db)):
+    """Watch a tag page on a source: same Off->On create/resume and On->Off pause rules as creators.
+
+    Imports from the watch get the tag itself by default, since the site may not tag them.
+    """
+    s, t = _source_tag(db, source_id, tag_id)
+    watch_targets.toggle(db, watch_targets.source_tag_watches(db, s.id, t.id), body,
+                         watch_targets.source_tag_url(db, s, t), f"{s.name}: #{t.name}", [t.name],
+                         {"kind": "source_tag", "source_id": s.id, "tag_id": t.id})
+    return get_source_tag_watch(source_id, tag_id, db)
 
 
 @router.get("/sources/{source_id}/delete-preview")

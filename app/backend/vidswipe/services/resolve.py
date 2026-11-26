@@ -60,6 +60,11 @@ def find_creator(db: Session, source_id: int, handle: str) -> Creator | None:
 def resolve_creator(db: Session, source: Source, handle: str, name: str | None = None,
                     profile_url: str | None = None, avatar_path: str | None = None) -> Creator:
     handle = (handle or name or "unknown").strip()
+    if not profile_url and source.creator_url_template:
+        # yt-dlp gave no profile URL: build one from the source's template
+        from .urls import creator_url
+
+        profile_url = creator_url(source.creator_url_template, source.domain, handle, name)
     c = find_creator(db, source.id, handle)
     if c is None:
         c = Creator(source_id=source.id, handle=handle, name=name or handle, profile_url=profile_url,

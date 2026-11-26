@@ -156,12 +156,14 @@ def clear_recent(user: User = Depends(require_user), db: Session = Depends(get_d
 # ---- library lists ----------------------------------------------------------------------------
 
 def watched_creator_ids(db: Session) -> set[int] | None:
-    try:
-        data = importer_client.request("GET", "/api/watches")
-    except HTTPException:
+    from ..models import WatchLink
+
+    items = importer_client.all_watches()
+    if items is None:
         return None
-    items = data if isinstance(data, list) else (data or {}).get("items", [])
-    out: set[int] = set()
+    enabled_ids = {w["id"] for w in items if w.get("enabled", True)}
+    out: set[int] = set(db.scalars(select(WatchLink.creator_id).where(
+        WatchLink.kind == "creator", WatchLink.watch_id.in_(enabled_ids))))
     for w in items:
         dom, handle = w.get("creator_source_domain"), w.get("creator_handle")
         if not dom or not handle or not w.get("enabled", True):
@@ -233,19 +235,9 @@ def get_creator(creator_id: int, auth: Auth = Depends(get_auth), db: Session = D
 
 
 def creator_watch_status(db: Session, c: Creator) -> dict:
-    handles = [c.handle] + list(db.scalars(select(CreatorAlias.handle).where(CreatorAlias.creator_id == c.id)))
-    watches = importer_client.watches_for_creator(c.source.domain, handles)
-    if watches is None:
-        return {"state": "offline", "watches": []}
-    if not watches:
-        state = "none"
-    elif any(w.get("enabled") and not w.get("erroring") for w in watches):
-        state = "watching"
-    elif any(w.get("erroring") for w in watches):
-        state = "error"
-    else:
-        state = "paused"
-    return {"state": state, "watches": watches}
+    from ..services.watch_targets import creator_status
+
+    return creator_status(db, c)
 
 
 # ---- categories -------------------------------------------------------------------------------

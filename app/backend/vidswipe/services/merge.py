@@ -122,6 +122,10 @@ def merge_tags(db: Session, from_ids: list[int], into_id: int, user_id: int | No
             db.add(TagAlias(alias=t.name, tag_id=into.id))
     db.flush()
     # 4/5. stats and delete from tags
+    # per-source tag URLs and tag watches follow the surviving tag (existing ones on it win)
+    in_fids = ",".join(str(int(i)) for i in fids)
+    db.execute(text(f"UPDATE OR IGNORE source_tags SET tag_id = :into WHERE tag_id IN ({in_fids})"), {"into": into.id})
+    db.execute(text(f"UPDATE watch_links SET tag_id = :into WHERE tag_id IN ({in_fids})"), {"into": into.id})
     db.execute(delete(UserTagStats).where(UserTagStats.tag_id.in_(fids)))
     for t in froms:
         db.delete(t)
@@ -287,6 +291,8 @@ def merge_creators(db: Session, from_ids: list[int], into_id: int, user_id: int 
             into_cats.add(c.category_id)
     for a in db.scalars(select(CreatorAlias).where(CreatorAlias.creator_id.in_(fids))).all():
         a.creator_id = into.id
+    in_fids = ",".join(str(int(i)) for i in fids)
+    db.execute(text(f"UPDATE watch_links SET creator_id = :into WHERE creator_id IN ({in_fids})"), {"into": into.id})
     db.flush()
     for c in froms:
         db.delete(c)
