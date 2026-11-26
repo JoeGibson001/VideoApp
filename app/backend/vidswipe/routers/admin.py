@@ -176,6 +176,19 @@ class CreatorPatch(BaseModel):
     profile_url: str | None = None
 
 
+@router.get("/creators/{creator_id}/delete-preview")
+def creator_delete_preview(creator_id: int, db: Session = Depends(get_db)):
+    return maintenance.delete_preview(db, "creator", creator_id)
+
+
+@router.delete("/creators/{creator_id}")
+def delete_creator(creator_id: int, db: Session = Depends(get_db)):
+    """Delete a creator and all of their videos (files included)."""
+    res = maintenance.delete_creator(db, creator_id)
+    importer_client.invalidate_watch_cache()
+    return {"ok": True, **res}
+
+
 @router.patch("/creators/{creator_id}")
 def patch_creator(creator_id: int, body: CreatorPatch, db: Session = Depends(get_db)):
     c = db.get(Creator, creator_id)
@@ -399,17 +412,14 @@ def rename_tag(tag_id: int, body: TagIn, db: Session = Depends(get_db)):
 
 
 @router.delete("/tags/{tag_id}")
-def delete_tag(tag_id: int, db: Session = Depends(get_db)):
-    t = db.get(Tag, tag_id)
-    if t is None:
-        raise HTTPException(404)
-    from ..models import CategoryItem
+def delete_tag(tag_id: int, delete_videos: bool = False, db: Session = Depends(get_db)):
+    """Delete a tag. With delete_videos=true every video carrying the tag is deleted as well."""
+    return {"ok": True, **maintenance.delete_tag(db, tag_id, delete_videos)}
 
-    db.execute(delete(CategoryItem).where(CategoryItem.item_type == "tag", CategoryItem.item_id == t.id))
-    db.delete(t)
-    db.commit()
-    search_index.invalidate()
-    return {"ok": True}
+
+@router.get("/tags/{tag_id}/delete-preview")
+def tag_delete_preview(tag_id: int, db: Session = Depends(get_db)):
+    return maintenance.delete_preview(db, "tag", tag_id)
 
 
 class AliasIn(BaseModel):
@@ -451,6 +461,19 @@ def patch_source(source_id: int, body: SourcePatch, db: Session = Depends(get_db
     db.commit()
     search_index.invalidate()
     return source_dict(s)
+
+
+@router.get("/sources/{source_id}/delete-preview")
+def source_delete_preview(source_id: int, db: Session = Depends(get_db)):
+    return maintenance.delete_preview(db, "source", source_id)
+
+
+@router.delete("/sources/{source_id}")
+def delete_source(source_id: int, db: Session = Depends(get_db)):
+    """Delete a source with all of its videos and creators (files included)."""
+    res = maintenance.delete_source(db, source_id)
+    importer_client.invalidate_watch_cache()
+    return {"ok": True, **res}
 
 
 @router.post("/sources/{source_id}/icon")
@@ -556,6 +579,23 @@ async def watches_proxy(request_: Request, rest: str = ""):
 
 
 # ---- maintenance ------------------------------------------------------------------------------
+
+@router.get("/cleanup")
+def cleanup_preview(db: Session = Depends(get_db)):
+    """List tags, creators and sources that have no videos."""
+    return maintenance.find_empty(db)
+
+
+class CleanupIn(BaseModel):
+    types: list[str] = ["tag", "creator", "source"]
+
+
+@router.post("/cleanup")
+def cleanup(body: CleanupIn | None = None, db: Session = Depends(get_db)):
+    """Delete tags, creators and sources that have no videos."""
+    types = set(body.types if body else ["tag", "creator", "source"]) & {"tag", "creator", "source"}
+    return maintenance.cleanup_empty(db, types)
+
 
 @router.post("/recompute-stats")
 def recompute_stats(db: Session = Depends(get_db)):

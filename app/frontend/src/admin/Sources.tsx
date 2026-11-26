@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api, get, patch } from '../api'
 import { Avatar, EmptyState, Spinner } from '../components/common'
 import type { SourceRef } from '../types'
-import { ErrorBox, FileButton, uploadForm, useAction, useLoad } from './shared'
+import { DangerDelete, ErrorBox, FileButton, uploadForm, useAction, useLoad } from './shared'
 
 interface AdminSource extends SourceRef { video_count: number }
 
@@ -15,14 +15,17 @@ export default function Sources() {
     <div>
       <ErrorBox error={list.error} />
       {list.loading && !list.data ? <Spinner /> : !items.length ? <EmptyState>No sources yet</EmptyState> : (
-        items.map((s) => <SourceRow key={s.id} source={s} onUpdated={update} />)
+        items.map((s) => <SourceRow key={s.id} source={s} onUpdated={update} onDeleted={() => void list.reload(true)} />)
       )}
     </div>
   )
 }
 
-function SourceRow({ source, onUpdated }: { source: AdminSource; onUpdated: (s: SourceRef) => void }) {
+function SourceRow({ source, onUpdated, onDeleted }: {
+  source: AdminSource; onUpdated: (s: SourceRef) => void; onDeleted: () => void
+}) {
   const [name, setName] = useState(source.name)
+  const [showDelete, setShowDelete] = useState(false)
   const act = useAction()
   const save = async () => {
     const r = await act.run(() => patch<SourceRef>(`/api/admin/sources/${source.id}`, { name }), 'Saved')
@@ -47,8 +50,10 @@ function SourceRow({ source, onUpdated }: { source: AdminSource; onUpdated: (s: 
         <input type="text" value={name} aria-label={`Display name for ${source.domain}`} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void save() }} />
         <button className="btn small primary" disabled={act.busy || !name.trim() || name === source.name} onClick={() => void save()}>Rename</button>
+        <button className="btn small" aria-expanded={showDelete} onClick={() => setShowDelete((x) => !x)}>Delete...</button>
       </div>
       <ErrorBox error={act.error} />
+      {showDelete ? <DangerDelete kind="source" id={source.id} onDeleted={onDeleted} /> : null}
     </div>
   )
 }

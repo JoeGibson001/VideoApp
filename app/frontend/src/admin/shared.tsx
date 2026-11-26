@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ApiError, errorMessage, get, post } from '../api'
+import { api, ApiError, errorMessage, get, post } from '../api'
 import { Spinner } from '../components/common'
 import { useToast } from '../state'
 
@@ -221,6 +221,84 @@ export function MergePreview({ kind, fromIds, intoId, allowSwap, onDone, onCance
           {act.busy ? 'Merging...' : 'Confirm merge'}
         </button>
       </div>
+    </div>
+  )
+}
+
+interface DeletePreviewData { type: 'source' | 'creator' | 'tag'; id: number; name: string; videos: number; creators?: number }
+
+/**
+ * Danger-zone delete for a source, creator or tag. Shows how many videos (and creators) will go,
+ * and asks the admin to type the name before anything that deletes videos.
+ * Tags can also be deleted on their own, keeping their videos.
+ */
+export function DangerDelete({ kind, id, onDeleted }: { kind: 'source' | 'creator' | 'tag'; id: number; onDeleted: () => void }) {
+  const [preview, setPreview] = useState<DeletePreviewData | null>(null)
+  const [withVideos, setWithVideos] = useState(kind !== 'tag')
+  const [typed, setTyped] = useState('')
+  const toast = useToast()
+  const act = useAction()
+  const base = kind === 'source' ? 'sources' : kind === 'creator' ? 'creators' : 'tags'
+
+  const open = async () => {
+    const p = await act.run(() => get<DeletePreviewData>(`/api/admin/${base}/${id}/delete-preview`))
+    if (p) { setPreview(p); setTyped(''); setWithVideos(kind !== 'tag') }
+  }
+  const run = async () => {
+    if (!preview) return
+    const params = kind === 'tag' && withVideos ? '?delete_videos=true' : ''
+    const r = await act.run(() => api<{ videos_deleted: number }>(`/api/admin/${base}/${id}${params}`, { method: 'DELETE' }))
+    if (r) {
+      toast(`Deleted ${preview.name}${r.videos_deleted ? ` and ${r.videos_deleted} video${r.videos_deleted === 1 ? '' : 's'}` : ''}`)
+      setPreview(null)
+      onDeleted()
+    }
+  }
+  const deletesVideos = !!preview && preview.videos > 0 && (kind !== 'tag' || withVideos)
+  const label = kind === 'source' ? 'source' : kind === 'creator' ? 'creator' : 'tag'
+
+  return (
+    <div className="card danger-zone">
+      <div className="section-title" style={{ marginTop: 0 }}>Danger zone</div>
+      {!preview ? (
+        <button className="btn danger" disabled={act.busy} onClick={() => void open()}>
+          {kind === 'tag' ? 'Delete tag...' : `Delete ${label} and all its videos...`}
+        </button>
+      ) : (
+        <div>
+          {kind === 'tag' ? (
+            <>
+              <label className="check">
+                <input type="radio" name={`del-${id}`} checked={!withVideos} onChange={() => setWithVideos(false)} />
+                Delete the tag only (its {preview.videos} video{preview.videos === 1 ? '' : 's'} are kept)
+              </label>
+              <label className="check">
+                <input type="radio" name={`del-${id}`} checked={withVideos} disabled={!preview.videos} onChange={() => setWithVideos(true)} />
+                Delete the tag and all {preview.videos} video{preview.videos === 1 ? '' : 's'} that have it
+              </label>
+            </>
+          ) : (
+            <p style={{ margin: '0 0 8px' }}>
+              This permanently deletes <b>{preview.name}</b>, <b>{preview.videos}</b> video{preview.videos === 1 ? '' : 's'}
+              {kind === 'source' ? <> and <b>{preview.creators}</b> creator{preview.creators === 1 ? '' : 's'}</> : null}, including
+              the video, poster and metadata files, plus everyone's ratings of those videos.
+              {' Active watches in the Importer are not removed; pause them first or they will import again.'}
+            </p>
+          )}
+          {deletesVideos ? (
+            <label className="field">Type <b>{preview.name}</b> to confirm. This cannot be undone.
+              <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type the name to confirm" />
+            </label>
+          ) : null}
+          <div className="btnrow">
+            <button className="btn" onClick={() => setPreview(null)}>Cancel</button>
+            <button className="btn danger" disabled={act.busy || (deletesVideos && typed.trim() !== preview.name)} onClick={() => void run()}>
+              {deletesVideos ? `Delete ${preview.videos} video${preview.videos === 1 ? '' : 's'}` : `Delete ${label}`}
+            </button>
+          </div>
+        </div>
+      )}
+      <ErrorBox error={act.error} />
     </div>
   )
 }

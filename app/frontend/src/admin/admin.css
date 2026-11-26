@@ -30,3 +30,5 @@
 .status.queued { background: #1f2430; color: var(--muted); }
 .status.erroring { background: #2a2210; color: var(--warn); }
 .sticky-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 6px; }
+
+.danger-zone { border: 1px solid #3a1518; margin-top: 18px; }

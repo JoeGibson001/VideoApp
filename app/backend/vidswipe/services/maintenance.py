@@ -2,11 +2,12 @@
 import logging
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from fastapi import HTTPException
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import Video, VideoTag
+from ..models import CategoryItem, Creator, CreatorAlias, Source, Tag, Video, VideoTag
 from ..routers.media import delete_media_file
 from . import search_index
 from .ingest import attach_tags, ingest, iter_sidecars, payload_from_sidecar, read_sidecar
@@ -17,21 +18,209 @@ log = logging.getLogger(__name__)
 
 
 def delete_video(db: Session, video: Video) -> None:
-    tag_ids = list(db.scalars(select(VideoTag.tag_id).where(VideoTag.video_id == video.id)))
-    creator_id, source_id = video.creator_id, video.source_id
-    paths = [video.file_path, video.poster_path, video.info_json_path]
-    db.delete(video)
+    delete_videos(db, [video.id])
+
+
+def delete_videos(db: Session, video_ids: list[int], commit: bool = True) -> dict:
+    """Delete videos, their DB rows (tags, ratings, collection links cascade) and media files.
+
+    Stats for every affected tag, creator and source are recomputed once from the ratings table.
+    Files are removed after commit, and only if no remaining video still references them.
+    """
+    video_ids = list(dict.fromkeys(int(i) for i in video_ids))
+    if not video_ids:
+        return {"videos_deleted": 0, "files_deleted": 0}
+    tag_ids: set[int] = set()
+    creator_ids: set[int] = set()
+    source_ids: set[int] = set()
+    paths: set[str] = set()
+    for chunk in _chunks(video_ids):
+        tag_ids.update(db.scalars(select(VideoTag.tag_id).where(VideoTag.video_id.in_(chunk))))
+        for v in db.execute(select(Video.creator_id, Video.source_id, Video.file_path, Video.poster_path,
+                                   Video.info_json_path).where(Video.id.in_(chunk))):
+            creator_ids.add(v.creator_id)
+            source_ids.add(v.source_id)
+            paths.update(p for p in (v.file_path, v.poster_path, v.info_json_path) if p)
+    for chunk in _chunks(video_ids):
+        db.execute(delete(Video).where(Video.id.in_(chunk)))
     db.flush()
     recompute_tags(db, tag_ids)
-    recompute_creators(db, [creator_id])
-    recompute_sources(db, [source_id])
-    db.commit()
+    recompute_creators(db, creator_ids)
+    recompute_sources(db, source_ids)
+    still_used: set[str] = set()
+    for col in (Video.file_path, Video.poster_path, Video.info_json_path):
+        for chunk in _chunks(sorted(paths)):
+            still_used.update(db.scalars(select(col).where(col.in_(chunk))))
+    if commit:
+        db.commit()
+    files = 0
+    for p in sorted(paths - still_used):
+        try:
+            delete_media_file(p)
+            files += 1
+        except OSError as exc:  # pragma: no cover
+            log.warning("could not delete %s: %s", p, exc)
+    search_index.invalidate()
+    return {"videos_deleted": len(video_ids), "files_deleted": files}
+
+
+def _chunks(items: list, size: int = 500):
+    items = list(items)
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+# ---- deleting whole sources / creators / tags ---------------------------------------------------
+
+def _delete_category_items(db: Session, item_type: str, ids: list[int]) -> None:
+    for chunk in _chunks(ids):
+        db.execute(delete(CategoryItem).where(CategoryItem.item_type == item_type, CategoryItem.item_id.in_(chunk)))
+
+
+def _delete_creators(db: Session, creator_ids: list[int]) -> list[str]:
+    """Delete creator rows (no videos may remain). Returns avatar paths to remove."""
+    avatars = [p for p in db.scalars(select(Creator.avatar_path).where(Creator.id.in_(creator_ids))) if p]
+    _delete_category_items(db, "creator", creator_ids)
+    for chunk in _chunks(creator_ids):
+        db.execute(delete(CreatorAlias).where(CreatorAlias.creator_id.in_(chunk)))
+        db.execute(delete(Creator).where(Creator.id.in_(chunk)))
+    return avatars
+
+
+def _remove_files(paths: list[str]) -> None:
     for p in paths:
         try:
             delete_media_file(p)
         except OSError as exc:  # pragma: no cover
             log.warning("could not delete %s: %s", p, exc)
+
+
+def delete_preview(db: Session, kind: str, item_id: int) -> dict:
+    if kind == "source":
+        src = db.get(Source, item_id)
+        if src is None:
+            raise HTTPException(404, "Source not found")
+        n = db.scalar(select(func.count()).select_from(Video).where(Video.source_id == item_id))
+        c = db.scalar(select(func.count()).select_from(Creator).where(Creator.source_id == item_id))
+        return {"type": kind, "id": item_id, "name": src.name, "videos": n, "creators": c}
+    if kind == "creator":
+        cr = db.get(Creator, item_id)
+        if cr is None:
+            raise HTTPException(404, "Creator not found")
+        n = db.scalar(select(func.count()).select_from(Video).where(Video.creator_id == item_id))
+        return {"type": kind, "id": item_id, "name": cr.name, "videos": n}
+    tag = db.get(Tag, item_id)
+    if tag is None:
+        raise HTTPException(404, "Tag not found")
+    n = db.scalar(select(func.count()).select_from(VideoTag).where(VideoTag.tag_id == item_id))
+    return {"type": kind, "id": item_id, "name": tag.name, "videos": n}
+
+
+def delete_source(db: Session, source_id: int) -> dict:
+    """Delete a source with all of its videos and creators."""
+    src = db.get(Source, source_id)
+    if src is None:
+        raise HTTPException(404, "Source not found")
+    vids = list(db.scalars(select(Video.id).where(Video.source_id == source_id)))
+    res = delete_videos(db, vids, commit=False)
+    creator_ids = list(db.scalars(select(Creator.id).where(Creator.source_id == source_id)))
+    files = _delete_creators(db, creator_ids)
+    db.execute(delete(CreatorAlias).where(CreatorAlias.source_id == source_id))
+    _delete_category_items(db, "source", [source_id])
+    if src.icon_path:
+        files.append(src.icon_path)
+    db.delete(src)
+    db.commit()
+    _remove_files(files)
     search_index.invalidate()
+    return {**res, "creators_deleted": len(creator_ids), "sources_deleted": 1}
+
+
+def delete_creator(db: Session, creator_id: int) -> dict:
+    """Delete a creator with all of their videos."""
+    if db.get(Creator, creator_id) is None:
+        raise HTTPException(404, "Creator not found")
+    vids = list(db.scalars(select(Video.id).where(Video.creator_id == creator_id)))
+    res = delete_videos(db, vids, commit=False)
+    files = _delete_creators(db, [creator_id])
+    db.commit()
+    _remove_files(files)
+    search_index.invalidate()
+    return {**res, "creators_deleted": 1}
+
+
+def delete_tag(db: Session, tag_id: int, with_videos: bool) -> dict:
+    """Delete a tag. With with_videos, every video carrying the tag is deleted too."""
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(404, "Tag not found")
+    res = {"videos_deleted": 0, "files_deleted": 0}
+    if with_videos:
+        vids = list(db.scalars(select(VideoTag.video_id).where(VideoTag.tag_id == tag_id)))
+        res = delete_videos(db, vids, commit=False)
+    _delete_category_items(db, "tag", [tag_id])
+    db.execute(delete(Tag).where(Tag.id == tag_id))  # aliases and stats cascade
+    db.commit()
+    search_index.invalidate()
+    return {**res, "tags_deleted": 1}
+
+
+# ---- cleanup of items with no videos ------------------------------------------------------------
+
+def find_empty(db: Session) -> dict:
+    """Tags, creators and sources that have no videos (hidden videos count as videos).
+
+    A source counts as empty when it has no videos; its creators are then empty too.
+    """
+    tags = db.execute(select(Tag.id, Tag.name).where(
+        ~exists().where(VideoTag.tag_id == Tag.id)).order_by(Tag.name)).all()
+    creators = db.execute(select(Creator.id, Creator.name, Creator.handle).where(
+        ~exists().where(Video.creator_id == Creator.id)).order_by(Creator.name)).all()
+    sources = db.execute(select(Source.id, Source.name, Source.domain).where(
+        ~exists().where(Video.source_id == Source.id)).order_by(Source.name)).all()
+    return {
+        "tags": [{"id": t.id, "name": t.name} for t in tags],
+        "creators": [{"id": c.id, "name": c.name, "handle": c.handle} for c in creators],
+        "sources": [{"id": s.id, "name": s.name, "domain": s.domain} for s in sources],
+    }
+
+
+def cleanup_empty(db: Session, types: set[str] | None = None) -> dict:
+    """Delete tags, creators and sources with zero videos. Returns what was removed."""
+    types = types or {"tag", "creator", "source"}
+    empty = find_empty(db)
+    files: list[str] = []
+    if "tag" in types and empty["tags"]:
+        ids = [t["id"] for t in empty["tags"]]
+        _delete_category_items(db, "tag", ids)
+        for chunk in _chunks(ids):
+            db.execute(delete(Tag).where(Tag.id.in_(chunk)))
+    if "creator" in types and empty["creators"]:
+        files += _delete_creators(db, [c["id"] for c in empty["creators"]])
+    removed_sources = []
+    if "source" in types:
+        for s in empty["sources"]:
+            # only remove a source once nothing references it
+            if db.scalar(select(func.count()).select_from(Creator).where(Creator.source_id == s["id"])):
+                continue
+            src = db.get(Source, s["id"])
+            db.execute(delete(CreatorAlias).where(CreatorAlias.source_id == s["id"]))
+            _delete_category_items(db, "source", [s["id"]])
+            if src.icon_path:
+                files.append(src.icon_path)
+            db.delete(src)
+            removed_sources.append(s)
+    db.commit()
+    _remove_files(files)
+    search_index.invalidate()
+    return {
+        "tags": empty["tags"] if "tag" in types else [],
+        "creators": empty["creators"] if "creator" in types else [],
+        "sources": removed_sources,
+        "tags_deleted": len(empty["tags"]) if "tag" in types else 0,
+        "creators_deleted": len(empty["creators"]) if "creator" in types else 0,
+        "sources_deleted": len(removed_sources),
+    }
 
 
 def rescan_media(db: Session) -> dict:

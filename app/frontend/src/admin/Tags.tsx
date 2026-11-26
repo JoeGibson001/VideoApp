@@ -4,7 +4,7 @@ import { EmptyState, Sheet, Spinner, formatDate } from '../components/common'
 import { Close, Search } from '../components/Icons'
 import { SearchPicker } from '../components/SearchPicker'
 import { useDebounced } from '../state'
-import { ErrorBox, MergePreview, errText, useAction, useLoad } from './shared'
+import { DangerDelete, ErrorBox, MergePreview, errText, useAction, useLoad } from './shared'
 
 interface AdminTag { id: number; name: string; video_count: number; aliases: string[]; created_at?: string }
 interface Duplicate {
@@ -185,11 +185,6 @@ function TagDetail({ id, onChanged, onDeleted, onMergeInto, onMergeOther }: {
       act.setError(errText(e))
     }
   }
-  const remove = async () => {
-    if (!window.confirm(`Delete tag "${tag.name}"? It is removed from ${tag.video_count} video(s) and all categories. This cannot be undone.`)) return
-    const r = await act.run(() => del(`/api/admin/tags/${id}`), 'Tag deleted')
-    if (r !== undefined) onDeleted()
-  }
   const addAlias = async () => {
     const a = alias.trim()
     if (!a) return
@@ -256,8 +251,8 @@ function TagDetail({ id, onChanged, onDeleted, onMergeInto, onMergeOther }: {
 
       <div className="btnrow" style={{ marginTop: 18 }}>
         <button className="btn" onClick={onMergeOther}>Merge another tag into this</button>
-        <button className="btn danger" disabled={act.busy} onClick={() => void remove()}>Delete tag</button>
       </div>
+      <DangerDelete kind="tag" id={tag.id} onDeleted={onDeleted} />
     </div>
   )
 }

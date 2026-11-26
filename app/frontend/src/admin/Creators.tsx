@@ -6,7 +6,7 @@ import { SearchPicker } from '../components/SearchPicker'
 import { WatchSection } from '../components/WatchSection'
 import { useDebounced } from '../state'
 import type { CreatorRef, SourceRef } from '../types'
-import { ErrorBox, FileButton, MergePreview, uploadForm, useAction, useLoad } from './shared'
+import { DangerDelete, ErrorBox, FileButton, MergePreview, uploadForm, useAction, useLoad } from './shared'
 
 interface AdminCreator extends CreatorRef {
   source: SourceRef
@@ -82,7 +82,8 @@ export default function Creators() {
           editing ? (
             <CreatorEditor key={editing.id} creator={editing}
               onSaved={() => void list.reload(true)}
-              onMerge={() => startMerge([editing.id])} />
+              onMerge={() => startMerge([editing.id])}
+              onDeleted={() => { close(); setSelected((s) => s.filter((x) => x !== editing.id)); void list.reload(true) }} />
           ) : <Spinner />
         ) : modal?.kind === 'pick' ? (
           <div>
@@ -102,7 +103,9 @@ export default function Creators() {
   )
 }
 
-function CreatorEditor({ creator, onSaved, onMerge }: { creator: AdminCreator; onSaved: () => void; onMerge: () => void }) {
+function CreatorEditor({ creator, onSaved, onMerge, onDeleted }: {
+  creator: AdminCreator; onSaved: () => void; onMerge: () => void; onDeleted: () => void
+}) {
   const [name, setName] = useState(creator.name)
   const [handle, setHandle] = useState(creator.handle)
   const [url, setUrl] = useState(creator.profile_url || '')
@@ -145,6 +148,7 @@ function CreatorEditor({ creator, onSaved, onMerge }: { creator: AdminCreator; o
       </div>
       <div className="section-title">Watch</div>
       <WatchSection creatorId={creator.id} />
+      <DangerDelete kind="creator" id={creator.id} onDeleted={onDeleted} />
     </div>
   )
 }
