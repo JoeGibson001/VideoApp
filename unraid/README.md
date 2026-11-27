@@ -92,6 +92,26 @@ Once SWAG works you can remove the `ports:` lines from the app service so it is 
 
 Docker tab > Compose > **Update Stack** (or **Compose Pull** then **Compose Up**). Pin a version with `TASTEBUD_TAG=1.2.0` if you want updates only when you choose.
 
+### "Update available" never goes away
+
+Unraid stores the digest of each installed image in `/var/lib/docker/unraid-update-status.json`.
+Only the Docker tab's own Update button rewrites that entry. After a Compose update the stored digest
+stays on the old image, so Unraid keeps reporting an update that is already installed. After updating
+the stack, run this once in the Unraid terminal. It records the digests of the images you now have:
+
+```sh
+php -r 'require_once "/usr/local/emhttp/plugins/dynamix.docker.manager/include/DockerClient.php";
+$u = new DockerUpdate();
+foreach (["tastebud-app", "tastebud-importer"] as $n) {
+  $img = "ghcr.io/joegibson001/$n:latest";
+  $local = $u->inspectLocalVersion($img);
+  if ($local) { $u->setUpdateStatus($img, $local); echo "$img $local\n"; }
+}'
+```
+
+To check the stored values: `jq '."ghcr.io/joegibson001/tastebud-app:latest"' /var/lib/docker/unraid-update-status.json`.
+You can put the same command in a User Scripts script and run it after each update.
+
 ## Backups
 
 - `appdata/tastebud/app/app.db`: users, ratings, collections, categories, settings. The Appdata Backup plugin can cover `appdata/tastebud`.
