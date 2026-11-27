@@ -11,6 +11,7 @@ export interface ImportJob {
   progress: number | null
   error: string | null
   detail?: string | null
+  stderr_tail?: string | null
   outcome?: string | null
   video_id: number | null
   title: string | null
@@ -183,7 +184,7 @@ export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: ()
                 <td className="nowrap">
                   <span className={`status ${j.status}`}>{j.status}</span>
                   {j.status === 'running' && j.progress != null ? (
-                    <div className="progress" style={{ marginTop: 6 }}><i style={{ width: `${Math.max(0, Math.min(100, Math.round(j.progress)))}%` }} /></div>
+                    <div className="import-progress" style={{ marginTop: 6 }}><i style={{ width: `${Math.max(0, Math.min(100, Math.round(j.progress)))}%` }} /></div>
                   ) : null}
                 </td>
                 <td className="title">
@@ -192,6 +193,12 @@ export function JobTable({ jobs, onChanged }: { jobs: ImportJob[]; onChanged: ()
                   {j.video_id ? <span className="sub">Video #{j.video_id}</span> : null}
                   {j.watch_name ? <span className="sub">via watch: {j.watch_name}</span> : null}
                   {j.error ? <span className="sub" style={{ color: '#fca5a5' }}>{j.error}</span> : null}
+                  {j.error && j.stderr_tail ? (
+                    <details className="sub">
+                      <summary>Tool output</summary>
+                      <pre className="tool-output">{j.stderr_tail}</pre>
+                    </details>
+                  ) : null}
                   {!j.error && j.status === 'skipped' && (j.detail || j.outcome) ? <span className="sub">{j.detail || j.outcome}</span> : null}
                 </td>
                 <td className="nowrap">{formatDateTime(j.created_at)}{j.finished_at ? <span className="sub">done {formatDateTime(j.finished_at)}</span> : null}</td>

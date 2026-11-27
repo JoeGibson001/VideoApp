@@ -491,6 +491,6 @@ export default function Feed({ type, id }: { type: FeedType; id?: number }) {
 }
 
 function labelFor(h: FeedHeader): string {
-  const kind = { tag: 'Tag', creator: 'Creator', source: 'Source', category: 'Category', collection: 'Collection', main: '' }[h.type]
+  const kind = { tag: 'Tag', creator: 'Creator', source: 'Source', category: 'Mood', collection: 'Collection', main: '' }[h.type]
   return `${kind}: ${h.label.replace(/^#/, '')}`
 }

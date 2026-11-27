@@ -22,6 +22,11 @@ from .proxy import subprocess_env
 log = logging.getLogger("vsimporter.adapters")
 
 FORMAT = "bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
+# ffmpeg exits with its internal error number truncated to 8 bits; name the common ones.
+FFMPEG_CODES = {
+    187: ": unexpected end of file, the download is probably incomplete",  # AVERROR_EOF
+    183: ": invalid data in the downloaded file",  # AVERROR_INVALIDDATA
+}
 ProgressCb = Callable[[float], Awaitable[None] | None]
 
 
@@ -295,7 +300,7 @@ class RealMedia:
     async def _ffmpeg(self, args: list[str], timeout: float = 6 * 3600) -> None:
         code, _, err = await run_process([self.s.ffmpeg_bin, "-hide_banner", "-nostdin", "-y", *args], timeout=timeout)
         if code != 0:
-            raise ToolError(f"ffmpeg failed (code {code})", err)
+            raise ToolError(f"ffmpeg failed (code {code}{FFMPEG_CODES.get(code, '')})", err)
 
     async def ffprobe(self, path: Path) -> dict:
         code, out, err = await run_process(

@@ -114,7 +114,7 @@ function CleanupCard() {
         <div style={{ flex: 1 }}>
           <b>Clean up empty items</b>
           <div className="muted" style={{ fontSize: 13 }}>
-            Finds tags, creators and sources with no videos and deletes them (with their aliases and category links).
+            Finds tags, creators and sources with no videos and deletes them (with their aliases and mood links).
             Hidden videos still count as videos. A source is only removed once it has no creators left.
           </div>
         </div>
@@ -202,7 +202,7 @@ function WipeCard() {
           </label>
           <label className="check">
             <input type="checkbox" checked={userData} onChange={(e) => setUserData(e.target.checked)} />
-            Also delete my {preview.collections} collection{preview.collections === 1 ? '' : 's'}, {preview.categories} categor{preview.categories === 1 ? 'y' : 'ies'} and recent searches
+            Also delete my {preview.collections} collection{preview.collections === 1 ? '' : 's'}, {preview.categories} mood{preview.categories === 1 ? '' : 's'} and recent searches
             (Favorites and Liked are always kept, empty)
           </label>
           <label className="field">Type <b>{phrase}</b> to confirm

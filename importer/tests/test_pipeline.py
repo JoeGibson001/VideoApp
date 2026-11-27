@@ -253,3 +253,26 @@ async def test_avatar_from_creator_profile_listing(svc, fakes, settings):
     await svc.jobs.run_until_idle()
     assert fakes.app.ingested[1]["creator"]["avatar_path"] == "avatars/youtube.com/somecreator.jpg"
     assert len(fakes.ytdlp.probes) == n + 1
+
+
+async def test_truncated_download_is_downloaded_again(svc, fakes):
+    fakes.ytdlp.add_video(yt_video("trunc1"))
+    fakes.media.convert_failures = 1
+    job_id = add_job(svc, "https://www.youtube.com/watch?v=trunc1")
+    await svc.jobs.run_until_idle()
+    job = get_job(svc, job_id)
+    assert job.status == "done", job.error
+    assert len(fakes.ytdlp.downloads) == 2
+    assert len(fakes.app.ingested) == 1
+
+
+async def test_download_unreadable_twice_fails_with_tool_output(svc, fakes):
+    fakes.ytdlp.add_video(yt_video("trunc2"))
+    fakes.media.convert_failures = 2
+    job_id = add_job(svc, "https://www.youtube.com/watch?v=trunc2")
+    await svc.jobs.run_until_idle()
+    job = get_job(svc, job_id)
+    assert job.status == "failed"
+    assert "unexpected end of file" in job.error and "after downloading twice" in job.error
+    assert "partial file" in job.stderr_tail
+    assert len(fakes.ytdlp.downloads) == 2 and not fakes.app.ingested

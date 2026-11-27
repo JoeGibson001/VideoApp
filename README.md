@@ -74,7 +74,7 @@ Sites change and yt-dlp breaks. Either set `YTDLP_AUTO_UPDATE=true` (updates on 
 
 ## Backups
 
-Back up `./data/app/app.db` (ratings, collections, categories, users) and `./data/media` (videos, posters, avatars and the metadata sidecar JSON). If the database is lost, Admin > Maintenance > "Rebuild from media" recreates videos, creators, sources and tags from the sidecars; ratings, collections and categories need the database backup. Use `sqlite3 app.db ".backup app-backup.db"` for a consistent copy while running.
+Back up `./data/app/app.db` (ratings, collections, moods, users) and `./data/media` (videos, posters, avatars and the metadata sidecar JSON). If the database is lost, Admin > Maintenance > "Rebuild from media" recreates videos, creators, sources and tags from the sidecars; ratings, collections and moods need the database backup. Use `sqlite3 app.db ".backup app-backup.db"` for a consistent copy while running.
 
 ## Tests
 
@@ -101,9 +101,9 @@ docker compose -f docker-compose.e2e.yml down -v
 ## Using the app
 
 - **Feed**: swipe right = like, left = dislike (both advance), up/down = next/previous without rating. Tap to pause. Heart = Favorites (does not rate or advance). Keyboard: Left/Right rate, Up/Down navigate, Space pause, M mute, I details, F favorite.
-- **Library**: Tags / Creators / Sources / Categories with scores, sorting and fuzzy search; tap a row for its feed; the row menu adds it to a category.
+- **Library**: Tags / Creators / Sources / Moods with scores, sorting and fuzzy search; tap a row for its feed; the row menu adds it to a mood (a group of tags, creators and sources with its own feed).
 - **Collections**: Favorites (manual), Liked (automatic), and your own playlists with drag to reorder.
-- **Admin**: videos, creators (merge, avatar, watch toggle), tags (rename, merge with preview, aliases, duplicates, undo), sources, import, watches, maintenance.
+- **Admin**: videos, creators (merge, avatar, watch toggle), tags (rename, merge with preview, aliases, duplicates, undo, watch a tag page on any source), sources, import, watches, maintenance. Tags, creators and sources sort like the library.
 
 ## Configuration
 

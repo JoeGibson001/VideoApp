@@ -6,12 +6,13 @@ import { SearchPicker } from '../components/SearchPicker'
 import { WatchSection } from '../components/WatchSection'
 import { useDebounced } from '../state'
 import type { CreatorRef, SourceRef } from '../types'
-import { DangerDelete, ErrorBox, FileButton, MergePreview, uploadForm, useAction, useLoad } from './shared'
+import { DangerDelete, ErrorBox, FileButton, MergePreview, SortSelect, scoreText, uploadForm, useAction, useLoad, useStoredState } from './shared'
 
 interface AdminCreator extends CreatorRef {
   source: SourceRef
   video_count: number
   aliases: string[]
+  score?: number
 }
 
 type Modal =
@@ -23,7 +24,8 @@ type Modal =
 export default function Creators() {
   const [q, setQ] = useState('')
   const dq = useDebounced(q.trim(), 250)
-  const list = useLoad(() => get<{ items: AdminCreator[] }>('/api/admin/creators', { q: dq }), [dq])
+  const [sort, setSort] = useStoredState('admin.creators.sort', 'name_asc')
+  const list = useLoad(() => get<{ items: AdminCreator[] }>('/api/admin/creators', { q: dq, sort }), [dq, sort])
   const [selected, setSelected] = useState<number[]>([])
   const [modal, setModal] = useState<Modal>(null)
   const [selErr, setSelErr] = useState('')
@@ -47,6 +49,7 @@ export default function Creators() {
           <Search />
           <input type="search" value={q} placeholder="Search creators" aria-label="Search creators" onChange={(e) => setQ(e.target.value)} />
         </div>
+        <SortSelect value={sort} onChange={setSort} />
         {selected.length ? (
           <>
             <span className="muted">{selected.length} selected</span>
@@ -59,7 +62,7 @@ export default function Creators() {
       {list.loading && !list.data ? <Spinner /> : !items.length ? <EmptyState>No creators</EmptyState> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th></th><th></th><th>Name</th><th>Source</th><th className="num">Videos</th></tr></thead>
+            <thead><tr><th></th><th></th><th>Name</th><th>Source</th><th className="num">Videos</th><th className="num">Score</th></tr></thead>
             <tbody>
               {items.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => setModal({ kind: 'edit', id: c.id })}>
@@ -70,6 +73,7 @@ export default function Creators() {
                   <td className="title">{c.name}<span className="sub">{c.handle}{c.aliases?.length ? ` (aka ${c.aliases.join(', ')})` : ''}</span></td>
                   <td>{c.source?.name}</td>
                   <td className="num">{c.video_count}</td>
+                  <td className="num">{scoreText(c.score)}</td>
                 </tr>
               ))}
             </tbody>

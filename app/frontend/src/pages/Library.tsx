@@ -5,25 +5,17 @@ import { EmptyState, ItemRow, PageHeader, Sheet, Spinner } from '../components/c
 import { More, Search } from '../components/Icons'
 import { useAuth, useDebounced, useToast } from '../state'
 import type { CategorySummary, ItemType, LibraryRow, Paged } from '../types'
+import { LIBRARY_SORTS } from '../sorts'
 import { CategoriesList } from './CategoriesList'
 
 const TABS = [
   { key: 'tags', label: 'Tags', type: 'tag' as ItemType },
   { key: 'creators', label: 'Creators', type: 'creator' as ItemType },
   { key: 'sources', label: 'Sources', type: 'source' as ItemType },
-  { key: 'categories', label: 'Categories', type: null },
+  { key: 'categories', label: 'Moods', type: null },
 ]
 
-const SORTS = [
-  ['score_desc', 'Score, high to low'],
-  ['score_asc', 'Score, low to high'],
-  ['name_asc', 'Name A to Z'],
-  ['name_desc', 'Name Z to A'],
-  ['newest', 'Newest'],
-  ['oldest', 'Oldest'],
-  ['most_videos', 'Most videos'],
-  ['recent', 'Most recently rated'],
-]
+const SORTS = LIBRARY_SORTS
 
 export default function Library() {
   const [params, setParams] = useSearchParams()
@@ -141,16 +133,16 @@ export function AddToCategorySheet({ item, onClose }: { item: LibraryRow | null;
     } catch (e) { toast(errorMessage(e)) }
   }
   return (
-    <Sheet open={!!item} onClose={onClose} label="Add to category">
-      <h3>Add {item?.type === 'tag' ? '#' : ''}{item?.name} to category</h3>
+    <Sheet open={!!item} onClose={onClose} label="Add to mood">
+      <h3>Add {item?.type === 'tag' ? '#' : ''}{item?.name} to a mood</h3>
       {!cats ? <Spinner /> : cats.map((c) => (
         <button key={c.id} className="colcard" onClick={() => void add(c.id, c.name)}>
           <span className="t">{c.name}<small>{c.item_count} items</small></span>
         </button>
       ))}
-      {cats && !cats.length ? <p className="muted">No categories yet. Create one:</p> : null}
+      {cats && !cats.length ? <p className="muted">No moods yet. Create one:</p> : null}
       <form className="btnrow" onSubmit={(e) => { e.preventDefault(); void create() }}>
-        <input type="text" placeholder="New category name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input type="text" placeholder="New mood name" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn primary" type="submit" style={{ flex: 'none' }}>Create</button>
       </form>
     </Sheet>

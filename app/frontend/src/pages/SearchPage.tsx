@@ -9,7 +9,7 @@ import type { LibraryRow, SearchResponse } from '../types'
 type Group = 'tag' | 'creator' | 'source' | 'collection' | 'category'
 const GROUPS: { key: Group; label: string }[] = [
   { key: 'tag', label: 'Tags' }, { key: 'creator', label: 'Creators' }, { key: 'source', label: 'Sources' },
-  { key: 'collection', label: 'Collections' }, { key: 'category', label: 'Categories' },
+  { key: 'collection', label: 'Collections' }, { key: 'category', label: 'Moods' },
 ]
 
 export default function SearchPage() {

@@ -29,6 +29,7 @@ from ..services.ingest import attach_tags
 from ..services.ratings import recompute_all, recompute_creators, recompute_sources, recompute_tags
 from ..services.resolve import find_tag
 from ..services.serialize import creator_dict, media_url, source_dict, video_detail
+from ..services.library import user_stats
 from ..services.text import normalize_tag
 from .api import creator_watch_status
 
@@ -156,20 +157,63 @@ def reread_video(video_id: int, db: Session = Depends(get_db)):
 
 # ---- creators ---------------------------------------------------------------------------------
 
+# ---- sorting (same options as the user library; scores are the admin's own) --------------------
+
+
+def _sorted(db: Session, user: User, kind: str, objs: list, counts: dict, sort: str) -> tuple[list, dict]:
+    """Sort Tag/Creator/Source rows like the library does. Returns (objs, the admin's stats by id)."""
+    stats = user_stats(db, user.id, kind)
+
+    def name(o):
+        return o.name.lower()
+
+    def score(o):
+        return stats.get(o.id, {}).get("score", 0)
+
+    def created(o):
+        return o.created_at.isoformat() if o.created_at else ""
+
+    def rated(o):
+        v = stats.get(o.id, {}).get("last_rated_at")
+        return v.isoformat() if v else ""
+
+    keys = {
+        "score_desc": (lambda o: (-score(o), -counts.get(o.id, 0), name(o)), False),
+        "score_asc": (lambda o: (score(o), -counts.get(o.id, 0), name(o)), False),
+        "name_desc": (name, True),
+        "newest": (created, True),
+        "oldest": (created, False),
+        "most_videos": (lambda o: (-counts.get(o.id, 0), name(o)), False),
+        "recent": (rated, True),
+    }
+    key, reverse = keys.get(sort, (name, False))
+    return sorted(objs, key=key, reverse=reverse), stats
+
+
+def _with_stats(d: dict, obj, stats: dict) -> dict:
+    st = stats.get(obj.id, {})
+    d.update(score=st.get("score", 0), likes=st.get("likes", 0), dislikes=st.get("dislikes", 0),
+             last_rated_at=st["last_rated_at"].isoformat() + "Z" if st.get("last_rated_at") else None,
+             created_at=obj.created_at.isoformat() + "Z" if obj.created_at else None)
+    return d
+
+
 @router.get("/creators")
-def admin_creators(q: str = "", db: Session = Depends(get_db)):
+def admin_creators(q: str = "", sort: str = "name_asc", db: Session = Depends(get_db),
+                   admin: User = Depends(require_admin)):
     query = select(Creator)
     if q:
         query = query.where(or_(Creator.name.ilike(f"%{q}%"), Creator.handle.ilike(f"%{q}%")))
     counts = dict(db.execute(select(Video.creator_id, func.count()).group_by(Video.creator_id)).all())
+    creators, stats = _sorted(db, admin, "creator", list(db.scalars(query).unique()), counts, sort)
     out = []
-    for c in db.scalars(query.order_by(func.lower(Creator.name)).limit(500)).unique():
+    for c in creators[:500]:
         d = creator_dict(c)
         d["source"] = source_dict(c.source)
         d["video_count"] = counts.get(c.id, 0)
         d["aliases"] = list(db.scalars(select(CreatorAlias.handle).where(CreatorAlias.creator_id == c.id)))
-        out.append(d)
-    return {"items": out}
+        out.append(_with_stats(d, c, stats))
+    return {"items": out, "total": len(creators)}
 
 
 class CreatorPatch(BaseModel):
@@ -286,7 +330,8 @@ def toggle_creator_watch(creator_id: int, body: WatchToggleIn, db: Session = Dep
 # ---- tags -------------------------------------------------------------------------------------
 
 @router.get("/tags")
-def admin_tags(q: str = "", db: Session = Depends(get_db)):
+def admin_tags(q: str = "", sort: str = "name_asc", db: Session = Depends(get_db),
+               admin: User = Depends(require_admin)):
     query = select(Tag)
     if q:
         query = query.where(Tag.name.ilike(f"%{normalize_tag(q)}%"))
@@ -294,10 +339,43 @@ def admin_tags(q: str = "", db: Session = Depends(get_db)):
     aliases: dict[int, list[str]] = {}
     for a in db.scalars(select(TagAlias)):
         aliases.setdefault(a.tag_id, []).append(a.alias)
-    items = [{"id": t.id, "name": t.name, "video_count": counts.get(t.id, 0), "aliases": sorted(aliases.get(t.id, [])),
-              "created_at": t.created_at.isoformat() + "Z"}
-             for t in db.scalars(query.order_by(Tag.name).limit(1000))]
-    return {"items": items}
+    tags, stats = _sorted(db, admin, "tag", list(db.scalars(query)), counts, sort)
+    items = [_with_stats({"id": t.id, "name": t.name, "video_count": counts.get(t.id, 0),
+                          "aliases": sorted(aliases.get(t.id, []))}, t, stats)
+             for t in tags[:1000]]
+    return {"items": items, "total": len(tags)}
+
+
+@router.get("/tags/{tag_id}/sources")
+def tag_sources(tag_id: int, db: Session = Depends(get_db)):
+    """Every source with this tag's page URL and watch state, so a tag can be watched from the Tags page.
+
+    `used` sources (the tag is on their videos, was added by hand, or is watched there) come first.
+    """
+    t = db.get(Tag, tag_id)
+    if t is None:
+        raise HTTPException(404, "Tag not found")
+    counts = dict(db.execute(select(Video.source_id, func.count(func.distinct(Video.id)))
+                             .join(VideoTag, VideoTag.video_id == Video.id)
+                             .where(VideoTag.tag_id == t.id).group_by(Video.source_id)).all())
+    overrides = {st.source_id: st.url for st in db.scalars(select(SourceTag).where(SourceTag.tag_id == t.id))}
+    linked = {lk.source_id for lk in db.scalars(select(WatchLink).where(WatchLink.kind == "source_tag",
+                                                                         WatchLink.tag_id == t.id))}
+    all_w = importer_client.all_watches() if linked else []
+    items = []
+    for s in db.scalars(select(Source).order_by(Source.name)):
+        used = s.id in counts or s.id in overrides or s.id in linked
+        item = {"source": source_dict(s), "video_count": counts.get(s.id, 0), "used": used,
+                "added": s.id in overrides, "custom_url": overrides.get(s.id),
+                "url": overrides.get(s.id) or urls.tag_url(s.tag_url_template, s.domain, t.name)}
+        if s.id in linked:
+            item["watch"] = watch_targets.summarize(
+                None if all_w is None else watch_targets.source_tag_watches(db, s.id, t.id, all_w))
+        else:
+            item["watch"] = {"state": "offline" if all_w is None else "none", "watches": []}
+        items.append(item)
+    items.sort(key=lambda i: (not i["used"], -i["video_count"], i["source"]["name"].lower()))
+    return {"tag": {"id": t.id, "name": t.name}, "items": items}
 
 
 @router.get("/tags/resolve")
@@ -442,10 +520,11 @@ def _source_or_404(db: Session, source_id: int) -> Source:
 
 
 @router.get("/sources")
-def admin_sources(db: Session = Depends(get_db)):
+def admin_sources(sort: str = "name_asc", db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     counts = dict(db.execute(select(Video.source_id, func.count()).group_by(Video.source_id)).all())
     ccounts = dict(db.execute(select(Creator.source_id, func.count()).group_by(Creator.source_id)).all())
-    return {"items": [_admin_source(db, s, counts, ccounts) for s in db.scalars(select(Source).order_by(Source.name))]}
+    sources, stats = _sorted(db, admin, "source", list(db.scalars(select(Source))), counts, sort)
+    return {"items": [_with_stats(_admin_source(db, s, counts, ccounts), s, stats) for s in sources]}
 
 
 @router.get("/sources/{source_id}")

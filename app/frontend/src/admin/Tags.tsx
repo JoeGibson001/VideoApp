@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { ApiError, del, get, patch, post } from '../api'
-import { EmptyState, Sheet, Spinner, formatDate } from '../components/common'
-import { Close, Search } from '../components/Icons'
+import { ApiError, del, get, patch, post, put } from '../api'
+import { Avatar, EmptyState, Sheet, Spinner, formatDate } from '../components/common'
+import { Close, External, Search } from '../components/Icons'
 import { SearchPicker } from '../components/SearchPicker'
 import { useDebounced } from '../state'
-import { DangerDelete, ErrorBox, MergePreview, errText, useAction, useLoad } from './shared'
+import { WatchIndicator, WatchSection } from '../components/WatchSection'
+import type { SourceRef, WatchStatus } from '../types'
+import { DangerDelete, ErrorBox, MergePreview, SortSelect, errText, scoreText, useAction, useLoad, useStoredState } from './shared'
 
-interface AdminTag { id: number; name: string; video_count: number; aliases: string[]; created_at?: string }
+interface AdminTag { id: number; name: string; video_count: number; aliases: string[]; created_at?: string; score?: number }
 interface Duplicate {
   tag_a: { id: number; name: string; video_count: number }
   tag_b: { id: number; name: string; video_count: number }
@@ -23,7 +25,8 @@ type Modal =
 export default function Tags() {
   const [q, setQ] = useState('')
   const dq = useDebounced(q.trim(), 250)
-  const list = useLoad(() => get<{ items: AdminTag[] }>('/api/admin/tags', { q: dq }), [dq])
+  const [sort, setSort] = useStoredState('admin.tags.sort', 'name_asc')
+  const list = useLoad(() => get<{ items: AdminTag[] }>('/api/admin/tags', { q: dq, sort }), [dq, sort])
   const dups = useLoad(() => get<{ items: Duplicate[] }>('/api/admin/tags/duplicates'), [])
   const [selected, setSelected] = useState<number[]>([])
   const [modal, setModal] = useState<Modal>(null)
@@ -49,6 +52,7 @@ export default function Tags() {
           <Search />
           <input type="search" value={q} placeholder="Search tags" aria-label="Search tags" onChange={(e) => setQ(e.target.value)} />
         </div>
+        <SortSelect value={sort} onChange={setSort} />
         {selected.length ? (
           <>
             <span className="muted">{selected.length} selected</span>
@@ -100,7 +104,7 @@ export default function Tags() {
       {list.loading && !list.data ? <Spinner /> : !items.length ? <EmptyState>No tags</EmptyState> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th></th><th>Tag</th><th className="num">Videos</th><th>Created</th></tr></thead>
+            <thead><tr><th></th><th>Tag</th><th className="num">Videos</th><th className="num">Score</th><th>Created</th></tr></thead>
             <tbody>
               {items.map((t) => (
                 <tr key={t.id} className="clickable" onClick={() => setModal({ kind: 'detail', id: t.id })}>
@@ -109,6 +113,7 @@ export default function Tags() {
                   </td>
                   <td className="title">#{t.name}{t.aliases.length ? <span className="sub">aliases: {t.aliases.join(', ')}</span> : null}</td>
                   <td className="num">{t.video_count}</td>
+                  <td className="num">{scoreText(t.score)}</td>
                   <td className="nowrap">{formatDate(t.created_at)}</td>
                 </tr>
               ))}
@@ -249,10 +254,116 @@ function TagDetail({ id, onChanged, onDeleted, onMergeInto, onMergeOther }: {
         <button className="btn small" disabled={act.busy || !alias.trim()} onClick={() => void addAlias()}>Add</button>
       </div>
 
+      <TagWatches tag={tag} />
+
       <div className="btnrow" style={{ marginTop: 18 }}>
         <button className="btn" onClick={onMergeOther}>Merge another tag into this</button>
       </div>
       <DangerDelete kind="tag" id={tag.id} onDeleted={onDeleted} />
+    </div>
+  )
+}
+
+interface TagSourceRow {
+  source: SourceRef
+  video_count: number
+  used: boolean
+  added: boolean
+  custom_url: string | null
+  url: string | null
+  watch: WatchStatus
+}
+
+/** Watch this tag's page on any source (same watches as Sources > a source > its tags). */
+function TagWatches({ tag }: { tag: TagInfo }) {
+  const list = useLoad(() => get<{ items: TagSourceRow[] }>(`/api/admin/tags/${tag.id}/sources`), [tag.id])
+  const [open, setOpen] = useState<number | null>(null)
+  const [adding, setAdding] = useState('')
+  const act = useAction()
+  const rows = list.data?.items || []
+  const used = rows.filter((r) => r.used)
+  const others = rows.filter((r) => !r.used)
+
+  const add = async () => {
+    const row = others.find((r) => String(r.source.id) === adding)
+    if (!row) return
+    const r = await act.run(() => post(`/api/admin/sources/${row.source.id}/tags`, { name: tag.name }),
+      `Added #${tag.name} to ${row.source.name}`)
+    if (r !== undefined) { setAdding(''); await list.reload(true); setOpen(row.source.id) }
+  }
+
+  return (
+    <div data-testid="tag-watches">
+      <div className="section-title">Watch this tag</div>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>
+        Each source has its own page for #{tag.name}. Open a source to watch that page for new videos.
+      </div>
+      <ErrorBox error={list.error || act.error} />
+      {list.loading && !list.data ? <Spinner /> : !used.length ? (
+        <div className="muted" style={{ fontSize: 13 }}>Not on any source yet. Add a source below to watch it there.</div>
+      ) : used.map((r) => (
+        <TagSourceItem key={r.source.id} tagName={tag.name} tagId={tag.id} row={r} open={open === r.source.id}
+          onToggle={() => setOpen((o) => (o === r.source.id ? null : r.source.id))}
+          onChanged={() => void list.reload(true)} />
+      ))}
+      {others.length ? (
+        <div className="rowline" style={{ marginTop: 8 }}>
+          <select value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="Add a source for this tag">
+            <option value="">Watch on another source...</option>
+            {others.map((r) => <option key={r.source.id} value={r.source.id}>{r.source.name} ({r.source.domain})</option>)}
+          </select>
+          <button className="btn small" disabled={act.busy || !adding} onClick={() => void add()}>Add</button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function TagSourceItem({ tagName, tagId, row, open, onToggle, onChanged }: {
+  tagName: string; tagId: number; row: TagSourceRow; open: boolean; onToggle: () => void; onChanged: () => void
+}) {
+  const [url, setUrl] = useState(row.custom_url || '')
+  const act = useAction()
+  const s = row.source
+  const saveUrl = async (value: string) => {
+    const r = await act.run(() => put(`/api/admin/sources/${s.id}/tags/${tagId}`, { url: value }),
+      value ? 'Tag URL saved' : 'Tag URL reset')
+    if (r !== undefined) onChanged()
+  }
+  return (
+    <div style={{ borderBottom: '1px solid var(--line)' }}>
+      <button className="itemrow-main" style={{ width: '100%' }} onClick={onToggle} aria-expanded={open}>
+        <Avatar name={s.name} url={s.icon_url} size={28} square />
+        <span className="itemrow-text">
+          <span className="itemrow-name">{s.name}</span>
+          <small>{row.video_count} video{row.video_count === 1 ? '' : 's'}{row.added && !row.video_count ? ' - added by hand' : ''}{row.url ? '' : ' - no tag URL'}</small>
+        </span>
+        {row.watch.state !== 'none' ? <WatchIndicator state={row.watch.state} /> : null}
+      </button>
+      {open ? (
+        <div style={{ padding: '0 2px 12px' }}>
+          <div className="kv" style={{ marginBottom: 8 }}>
+            <span>Tag page</span>
+            <span style={{ wordBreak: 'break-all' }}>
+              {row.url ? <a href={row.url} target="_blank" rel="noreferrer noopener">{row.url} <External /></a>
+                : `No URL. Set a tag URL template on Sources > ${s.name}, or a custom URL below.`}
+            </span>
+          </div>
+          <label className="field">Custom URL for #{tagName} on {s.name}
+            <div className="rowline" style={{ marginTop: 4 }}>
+              <input type="url" value={url} placeholder={row.url || 'https://...'} onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void saveUrl(url) }} />
+              <button className="btn small primary" disabled={act.busy || url === (row.custom_url || '')} onClick={() => void saveUrl(url)}>Save</button>
+              {row.custom_url ? <button className="btn small" disabled={act.busy} onClick={() => { setUrl(''); void saveUrl('') }}>Reset</button> : null}
+            </div>
+          </label>
+          <ErrorBox error={act.error} />
+          {row.url ? (
+            <WatchSection endpoint={`/api/admin/sources/${s.id}/tags/${tagId}/watch`} defaultTags={[tagName]}
+              description={`${row.url} is checked once a day for new videos. Imports are tagged #${tagName} by default.`} />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

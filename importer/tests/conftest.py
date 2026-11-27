@@ -109,6 +109,7 @@ class FakeMedia:
                              "audio_codec": "aac", "has_audio": True, "container": "mp4"}
         self.source_probe: dict | None = None
         self.converts: list[dict] = []
+        self.convert_failures = 0  # fail this many converts with ffmpeg's "end of file" error
 
     async def ffprobe(self, path: Path) -> dict:
         base = self.source_probe if (self.source_probe and path.name != "final.mp4") else self.probe_result
@@ -119,6 +120,10 @@ class FakeMedia:
 
     async def convert(self, src, dst, *, video_copy, audio_copy, has_audio):
         self.converts.append({"video_copy": video_copy, "audio_copy": audio_copy})
+        if self.convert_failures:
+            self.convert_failures -= 1
+            raise ToolError("ffmpeg failed (code 187: unexpected end of file, the download is probably incomplete)",
+                            "[mov,mp4] stream 0, offset 0x1234: partial file")
         Path(dst).write_bytes(Path(src).read_bytes())
 
     async def image_to_jpeg(self, src, dst, max_side=None):

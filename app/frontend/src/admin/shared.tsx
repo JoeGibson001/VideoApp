@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, errorMessage, get, post } from '../api'
 import { Spinner } from '../components/common'
+import { LIBRARY_SORTS } from '../sorts'
 import { useToast } from '../state'
 
 /** Responses may be a bare list or `{items: [...]}`. */
@@ -194,7 +195,7 @@ export function MergePreview({ kind, fromIds, intoId, allowSwap, onDone, onCance
           <div className="stats">
             <div className="stat"><b>{data.videos_affected}</b><small>videos affected</small></div>
             {kind === 'tag' ? <div className="stat"><b>{data.videos_with_both}</b><small>videos with both</small></div> : null}
-            <div className="stat"><b>{data.categories_affected}</b><small>categories affected</small></div>
+            <div className="stat"><b>{data.categories_affected}</b><small>moods affected</small></div>
           </div>
           {data.users.length ? (
             <div className="table-wrap">
@@ -301,4 +302,30 @@ export function DangerDelete({ kind, id, onDeleted }: { kind: 'source' | 'creato
       <ErrorBox error={act.error} />
     </div>
   )
+}
+
+/** Same sort options as the user library. Scores are the admin's own ratings. */
+export function SortSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Sort" style={{ flex: 'none', width: 'auto' }}>
+      {LIBRARY_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+    </select>
+  )
+}
+
+/** Remember a per-page choice (e.g. sort) in this browser. */
+export function useStoredState(key: string, initial: string): [string, (v: string) => void] {
+  const [v, setV] = useState(() => {
+    try { return localStorage.getItem(key) || initial } catch { return initial }
+  })
+  const set = (nv: string) => {
+    setV(nv)
+    try { localStorage.setItem(key, nv) } catch { /* storage unavailable */ }
+  }
+  return [v, set]
+}
+
+export function scoreText(score: number | undefined): string {
+  const n = Math.round(score || 0)
+  return n > 0 ? `+${n}` : String(n)
 }

@@ -465,8 +465,30 @@ class Pipeline:
                 last["p"] = p
                 self._progress(job_id, p)
 
-        video, dl_info = await self._ytdlp(a.ytdlp.download(info.get("webpage_url") or url, tmp, on_progress))
+        # A download that yt-dlp reports as finished can still be cut short (a proxy or the site dropping
+        # the connection). ffmpeg then fails part way through, so download once more before giving up.
+        for attempt in (1, 2):
+            video, dl_info = await self._ytdlp(a.ytdlp.download(info.get("webpage_url") or url, tmp, on_progress))
+            try:
+                p1, final = await self._check_and_convert(job_id, tmp, video, options)
+                break
+            except ToolError as e:
+                if attempt == 2:
+                    raise JobFailed(f"{e.message} (after downloading twice)", tail=e.tail) from e
+                log.warning("unreadable download, downloading again",
+                            extra={"job_id": job_id, "error": e.message})
+                for f in tmp.iterdir():
+                    if f.is_file() and (f.name.startswith("video.") or f.name == "final.mp4"):
+                        f.unlink(missing_ok=True)
+                last["p"] = -1
         full = dl_info if dl_info and str(dl_info.get("id")) == str(info["id"]) else info
+        probe = await a.media.ffprobe(final)
+        self._progress(job_id, 90)
+        await self._finish_ingest(job_id, tmp, url, info, full, tags, options, watch_id, video, p1, final, probe)
+
+    async def _check_and_convert(self, job_id: int, tmp: Path, video: Path, options: dict) -> tuple[dict, Path]:
+        """Limits and filters, then remux/transcode. ToolError means ffmpeg could not read the file."""
+        a = self.svc.adapters
         size = video.stat().st_size
         if self.s.max_file_bytes and size > self.s.max_file_bytes:
             raise JobFailed(f"Downloaded file is {size / 1048576:.0f} MB, over MAX_FILE_MB={self.s.max_file_mb}", "limit")
@@ -495,8 +517,15 @@ class Pipeline:
             audio_copy=not (need_a and transcode),
             has_audio=bool(p1.get("has_audio")),
         )
-        probe = await a.media.ffprobe(final)
-        self._progress(job_id, 90)
+        return p1, final
+
+    async def _finish_ingest(self, job_id: int, tmp: Path, url: str, info: dict, full: dict, tags: list[str],
+                             options: dict, watch_id: int | None, video: Path, p1: dict, final: Path,
+                             probe: dict) -> None:
+        a = self.svc.adapters
+        need_v = p1.get("video_codec") != "h264"
+        need_a = bool(p1.get("has_audio")) and p1.get("audio_codec") != "aac"
+        transcode = self.s.transcode_incompatible
 
         source = m.map_source(full)
         creator = m.map_creator(full, source)

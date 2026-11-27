@@ -271,3 +271,51 @@ def test_add_tag_resolves_aliases_and_remove(admin, fake):
     assert "puppies" not in names and "dog" in names
     # once removed and unused, the cleanup may delete it
     assert "puppies" in [t["name"] for t in admin.get("/api/admin/cleanup").json()["tags"]]
+
+
+def test_tag_sources_lists_every_source_and_watches_from_tags_page(admin, fake):
+    a = ingest(admin, domain="example.com", tags=["drift"])
+    ingest(admin, domain="other.org", tags=["cats"])
+    sid, tid = source_id(admin, a), tag_id(admin, "drift")
+    r = admin.get(f"/api/admin/tags/{tid}/sources").json()
+    assert r["tag"]["name"] == "drift"
+    first, second = r["items"]
+    assert first["source"]["domain"] == "example.com" and first["used"] and first["video_count"] == 1
+    assert first["url"] is None and first["watch"]["state"] == "none"
+    assert second["source"]["domain"] == "other.org" and not second["used"]
+    # set a URL template, then watch through the same endpoint the Sources page uses
+    admin.patch(f"/api/admin/sources/{sid}", json={"tag_url_template": "/tags/{tag}"})
+    admin.post(f"/api/admin/sources/{sid}/tags/{tid}/watch", json={"enabled": True})
+    first = admin.get(f"/api/admin/tags/{tid}/sources").json()["items"][0]
+    assert first["url"] == "https://example.com/tags/drift" and first["watch"]["state"] == "watching"
+    # adding the tag to another source by hand marks it used there
+    other = second["source"]["id"]
+    admin.post(f"/api/admin/sources/{other}/tags", json={"name": "drift", "url": "https://other.org/t/drift"})
+    items = admin.get(f"/api/admin/tags/{tid}/sources").json()["items"]
+    assert all(i["used"] for i in items)
+    assert [i for i in items if i["source"]["id"] == other][0]["url"] == "https://other.org/t/drift"
+    assert admin.get("/api/admin/tags/99999/sources").status_code == 404
+
+
+def test_admin_lists_sort_like_the_library(admin):
+    ingest(admin, domain="b.com", creator="zed", tags=["beta", "alpha"])
+    ingest(admin, domain="b.com", creator="zed", tags=["beta"])
+    liked = ingest(admin, domain="a.com", creator="amy", tags=["gamma"])
+    assert admin.put(f"/api/videos/{liked}/rating", json={"value": 1}).status_code == 200
+
+    def names(path, sort):
+        r = admin.get(path, params={"sort": sort})
+        assert r.status_code == 200, r.text
+        return [i["name"] for i in r.json()["items"]]
+
+    assert names("/api/admin/tags", "name_asc") == ["alpha", "beta", "gamma"]
+    assert names("/api/admin/tags", "name_desc") == ["gamma", "beta", "alpha"]
+    assert names("/api/admin/tags", "most_videos")[0] == "beta"
+    assert names("/api/admin/tags", "score_desc")[0] == "gamma"
+    assert names("/api/admin/tags", "recent")[0] == "gamma"
+    assert names("/api/admin/creators", "most_videos") == ["Zed", "Amy"]
+    assert names("/api/admin/creators", "score_desc")[0] == "Amy"
+    domains = lambda s: [i["domain"] for i in admin.get("/api/admin/sources", params={"sort": s}).json()["items"]]  # noqa: E731
+    assert domains("most_videos") == ["b.com", "a.com"] and domains("score_desc") == ["a.com", "b.com"]
+    tags = admin.get("/api/admin/tags", params={"sort": "newest"}).json()["items"]
+    assert all("score" in t and "created_at" in t for t in tags)

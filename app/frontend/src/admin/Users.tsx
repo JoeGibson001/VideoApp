@@ -204,7 +204,7 @@ function EditUser({ user, sources, onSaved, onDeleted }: {
     }
   }
   const remove = async () => {
-    if (!window.confirm(`Delete ${user.username}? Their ratings, collections and categories are deleted too. This cannot be undone.`)) return
+    if (!window.confirm(`Delete ${user.username}? Their ratings, collections and moods are deleted too. This cannot be undone.`)) return
     const r = await act.run(() => del(`/api/admin/users/${user.id}`))
     if (r !== undefined) { toast(`Deleted ${user.username}`); onDeleted() }
   }

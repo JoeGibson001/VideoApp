@@ -6,7 +6,7 @@ import { ChevronLeft, External, Search } from '../components/Icons'
 import { WatchIndicator, WatchSection } from '../components/WatchSection'
 import { useDebounced, useToast } from '../state'
 import type { SourceRef, WatchStatus } from '../types'
-import { DangerDelete, ErrorBox, FileButton, Pager, uploadForm, useAction, useLoad } from './shared'
+import { DangerDelete, ErrorBox, FileButton, Pager, SortSelect, scoreText, uploadForm, useAction, useLoad, useStoredState } from './shared'
 
 interface AdminSource extends SourceRef {
   video_count: number
@@ -15,12 +15,14 @@ interface AdminSource extends SourceRef {
   tag_url_template: string | null
   example_creator_url: string | null
   example_tag_url: string | null
+  score?: number
 }
 
 export default function Sources() {
   const [params, setParams] = useSearchParams()
   const openId = Number(params.get('id')) || null
-  const list = useLoad(() => get<{ items: AdminSource[] }>('/api/admin/sources'), [])
+  const [sort, setSort] = useStoredState('admin.sources.sort', 'name_asc')
+  const list = useLoad(() => get<{ items: AdminSource[] }>('/api/admin/sources', { sort }), [sort])
   const items = list.data?.items || []
   const open = (id: number | null) => setParams(id ? { id: String(id) } : {}, { replace: false })
 
@@ -29,6 +31,9 @@ export default function Sources() {
   }
   return (
     <div>
+      <div className="admin-head-sub">
+        <SortSelect value={sort} onChange={setSort} />
+      </div>
       <ErrorBox error={list.error} />
       {list.loading && !list.data ? <Spinner /> : !items.length ? <EmptyState>No sources yet</EmptyState> : (
         items.map((s) => (
@@ -37,7 +42,7 @@ export default function Sources() {
             <span className="t">
               <b>{s.name}</b>
               <small>
-                {s.domain} - {s.video_count} video{s.video_count === 1 ? '' : 's'}, {s.creator_count} creator{s.creator_count === 1 ? '' : 's'}
+                {s.domain} - {s.video_count} video{s.video_count === 1 ? '' : 's'}, {s.creator_count} creator{s.creator_count === 1 ? '' : 's'}, score {scoreText(s.score)}
                 {s.creator_url_template || s.tag_url_template ? ' - URL templates set' : ''}
               </small>
             </span>

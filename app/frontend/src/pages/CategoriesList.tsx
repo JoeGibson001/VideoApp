@@ -17,7 +17,7 @@ export function CategoriesList() {
     get<{ items: CategorySummary[] }>('/api/categories').then((r) => setCats(r.items)).catch((e) => toast(errorMessage(e)))
   }, [user, toast])
 
-  if (!user) return <EmptyState><p>Categories group tags, creators and sources into your own feeds.</p><Link className="btn primary" to="/login">Log in to use categories</Link></EmptyState>
+  if (!user) return <EmptyState><p>Moods group tags, creators and sources into your own feeds.</p><Link className="btn primary" to="/login">Log in to use moods</Link></EmptyState>
 
   const create = async () => {
     if (!name.trim()) return
@@ -30,11 +30,11 @@ export function CategoriesList() {
   return (
     <>
       <form className="btnrow" onSubmit={(e) => { e.preventDefault(); void create() }}>
-        <input type="text" placeholder="New category name" aria-label="New category name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input type="text" placeholder="New mood name" aria-label="New mood name" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn primary" type="submit" style={{ flex: 'none' }}>Create</button>
       </form>
       {!cats ? <Spinner /> : null}
-      {cats && !cats.length ? <EmptyState>No categories yet</EmptyState> : null}
+      {cats && !cats.length ? <EmptyState>No moods yet</EmptyState> : null}
       {cats?.map((c) => (
         <button key={c.id} className="colcard" onClick={() => navigate(`/library/category/${c.id}`)}>
           <span className="cover" aria-hidden="true">{'◈'}</span>

@@ -38,7 +38,7 @@ export default function CategoryPage() {
     try { await patch(`/api/categories/${id}`, { name, description: desc }); setEditing(false); load() } catch (e) { toast(errorMessage(e)) }
   }
   const remove_ = async () => {
-    if (!confirm('Delete this category? Its tags, creators and sources are not affected.')) return
+    if (!confirm('Delete this mood? Its tags, creators and sources are not affected.')) return
     try { await del(`/api/categories/${id}`); navigate('/library?tab=categories') } catch (e) { toast(errorMessage(e)) }
   }
 
@@ -46,7 +46,7 @@ export default function CategoryPage() {
 
   return (
     <div className="page">
-      <PageHeader title={cat?.name || 'Category'}
+      <PageHeader title={cat?.name || 'Mood'}
         left={<button className="iconbtn plain" aria-label="Back" onClick={() => navigate('/library?tab=categories')}><ChevronLeft /></button>}
         right={cat ? <ScoreBadge score={cat.score} /> : null} />
       <div className="page-inner">
@@ -86,7 +86,7 @@ export default function CategoryPage() {
             {!cat.item_count ? <EmptyState>Add tags, creators or sources to build this feed.</EmptyState> : null}
             <div className="btnrow" style={{ marginTop: 24 }}>
               <button className="btn" onClick={() => setEditing(true)}>Rename</button>
-              <button className="btn danger" onClick={() => void remove_()}>Delete category</button>
+              <button className="btn danger" onClick={() => void remove_()}>Delete mood</button>
             </div>
           </>
         )}
