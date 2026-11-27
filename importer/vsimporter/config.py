@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     ytdlp_auto_update: bool = False
     ytdlp_cookies_file: str = "/data/cookies.txt"
     ytdlp_bin: str = "yt-dlp"
+    # yt-dlp plugin folders (comma separated): the ones bundled in the image, then your own in /data.
+    # Each holds <package>/yt_dlp_plugins/extractor/*.py. Folders that do not exist are skipped.
+    ytdlp_plugin_dirs: str = "/opt/ytdlp-plugins,/data/ytdlp-plugins"
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
@@ -103,6 +106,11 @@ class Settings(BaseSettings):
             return None
         p = Path(self.ytdlp_cookies_file)
         return p if p.is_file() else None
+
+    @property
+    def plugin_dirs(self) -> list[Path]:
+        dirs = [Path(p.strip()) for p in self.ytdlp_plugin_dirs.split(",") if p.strip()]
+        return [d for d in dirs if d.is_dir()]
 
     @property
     def proxy(self) -> str | None:

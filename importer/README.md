@@ -53,6 +53,7 @@ the unprivileged `importer` user (uid/gid 1000) for the actual process.
 | `MAX_DURATION_MIN` | `240` | Longer videos fail with a clear message (0 = no limit). |
 | `YTDLP_AUTO_UPDATE` | `false` | `true` runs `pip install -U "yt-dlp[default]"` on every container start. |
 | `YTDLP_COOKIES_FILE` | `/data/cookies.txt` | Netscape cookies file, used only if it exists. |
+| `YTDLP_PLUGIN_DIRS` | `/opt/ytdlp-plugins,/data/ytdlp-plugins` | yt-dlp plugin folders (custom or fixed extractors). See "yt-dlp plugins" below. |
 | `PROXY_URL` | (empty) | Send all internet traffic through this proxy: `http://`, `https://` or `socks5://[user:pass@]host:port`. See "Proxy" below. |
 | `PROXY_KILL_SWITCH` | `true` | With a proxy, firewall every other outgoing connection (needs `cap_add: [NET_ADMIN]`). |
 | `DATA_DIR` | `/data` | `jobs.db` and `tmp/` (download scratch space, wiped on start). |
@@ -93,6 +94,17 @@ Sites change and yt-dlp breaks. Either:
 - rebuild the image to pick up the latest release: `docker compose build --no-cache importer && docker compose up -d importer`, or
 - set `YTDLP_AUTO_UPDATE=true` so every start upgrades yt-dlp (it lives in a venv owned by the
   non-root user, so this works without root). `GET /api/health` reports the running version.
+
+## yt-dlp plugins
+
+To fix or add a site extractor without patching yt-dlp, write a yt-dlp plugin:
+
+- in the repository under [`ytdlp-plugins/`](ytdlp-plugins/README.md), built into the image, or
+- in `/data/ytdlp-plugins` (same layout) to try one without rebuilding; restart the Importer after a change.
+
+Every yt-dlp call loads both folders, and `YTDLP_AUTO_UPDATE` does not touch them. `GET /api/health`
+lists the loaded plugins in `yt_dlp_plugins`, and Admin > Import shows them. The
+[plugin guide](ytdlp-plugins/README.md) has the folder layout and an override example.
 
 ## API
 

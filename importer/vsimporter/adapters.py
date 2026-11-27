@@ -51,6 +51,8 @@ class AppError(Exception):
 class YtDlp(Protocol):
     async def version(self) -> str: ...
 
+    async def plugins(self) -> list[str]: ...
+
     async def probe(self, url: str, *, flat: bool = False, playlist_end: int | None = None,
                     no_playlist: bool = False) -> dict: ...
 
@@ -138,15 +140,32 @@ async def run_process(
 # ---------------------------------------------------------------- real implementations
 
 _PCT = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
+_PLUGINS = re.compile(r"^\[debug\] (?:Extractor|Post-Processor) Plugins: (.+)$", re.M)
+
+
+def parse_plugins(verbose_output: str) -> list[str]:
+    """Plugin names from `yt-dlp --verbose` output ("tastebud (VimeoIE), other (FooIE)")."""
+    found: list[str] = []
+    for line in _PLUGINS.findall(verbose_output):
+        found += [p.strip() for p in re.split(r",\s*(?![^()]*\))", line) if p.strip()]
+    return found
 
 
 class RealYtDlp:
     def __init__(self, settings: Settings):
         self.s = settings
         self._version: str | None = None
+        self._plugins: list[str] | None = None
+
+    def _plugin_args(self) -> list[str]:
+        # Only our folders: "--plugin-dirs" replaces yt-dlp's default search locations.
+        args: list[str] = []
+        for d in self.s.plugin_dirs:
+            args += ["--plugin-dirs", str(d)]
+        return args or ["--no-plugin-dirs"]
 
     def _base(self) -> list[str]:
-        args = [self.s.ytdlp_bin, "--no-warnings", "--ignore-config", "--no-cache-dir"]
+        args = [self.s.ytdlp_bin, "--no-warnings", "--ignore-config", "--no-cache-dir", *self._plugin_args()]
         cookies = self.s.cookies_path
         if cookies:
             args += ["--cookies", str(cookies)]
@@ -167,6 +186,17 @@ class RealYtDlp:
             except Exception:  # noqa: BLE001
                 self._version = "unknown"
         return self._version
+
+    async def plugins(self) -> list[str]:
+        """Loaded plugins as yt-dlp reports them, e.g. "tastebud (VimeoIE)" for an override."""
+        if self._plugins is None:
+            args = [self.s.ytdlp_bin, "--ignore-config", "--verbose", *self._plugin_args(), "--simulate", "about:blank"]
+            try:
+                _, _, err = await run_process(args, timeout=60, env=self._env)
+            except Exception:  # noqa: BLE001
+                return []
+            self._plugins = parse_plugins(err)
+        return self._plugins
 
     async def probe(self, url: str, *, flat: bool = False, playlist_end: int | None = None,
                     no_playlist: bool = False) -> dict:

@@ -153,6 +153,7 @@ def create_app(svc: Importer, *, background: bool = True) -> FastAPI:
             "status": "ok",
             "version": IMPORTER_VERSION,
             "yt_dlp_version": await s.adapters.ytdlp.version(),
+            "yt_dlp_plugins": await s.adapters.ytdlp.plugins(),
             "proxy": {
                 "enabled": bool(s.settings.proxy),
                 "url": masked_proxy(s.settings.proxy),

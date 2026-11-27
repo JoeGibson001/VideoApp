@@ -78,6 +78,9 @@ class FakeYtDlp:
     async def version(self) -> str:
         return "2099.01.01"
 
+    async def plugins(self):
+        return []
+
     async def probe(self, url, *, flat=False, playlist_end=None, no_playlist=False):
         self.probes.append((url, flat))
         if url in self.errors:

@@ -34,6 +34,8 @@ RUN pip install -r requirements.txt && chown -R importer:importer /opt/venv
 COPY entrypoint.sh /entrypoint.sh
 COPY alembic.ini ./
 COPY vsimporter ./vsimporter
+# yt-dlp plugins shipped with the image (custom or fixed site extractors). See ytdlp-plugins/README.md.
+COPY ytdlp-plugins /opt/ytdlp-plugins
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod 0755 /entrypoint.sh
 
 # ---------------------------------------------------------------- tests
