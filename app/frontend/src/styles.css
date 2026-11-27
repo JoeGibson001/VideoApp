@@ -34,11 +34,15 @@ mark { background: none; color: var(--accent); font-weight: 700; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---- shell ---- */
-.shell { position: relative; height: 100dvh; width: 100vw; overflow: hidden; }
+/* 100vh first for browsers without dvh. */
+.shell { position: relative; height: 100vh; height: 100dvh; width: 100vw; overflow: hidden; }
 .page { position: absolute; inset: 0; overflow-y: auto; padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px); -webkit-overflow-scrolling: touch; }
 .page-inner { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+/* Absolute in .shell, not fixed to the window: the feed's overlays (tags, buttons, progress bar) are
+   placed against .shell's bottom, so the nav must use the same box. On phones the window and 100dvh
+   can differ while the browser bars resize, which put the tags behind a window-fixed nav. */
 .nav {
-  position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--nav-h) + var(--safe-bottom));
+  position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--nav-h) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom); display: flex; justify-content: space-around; align-items: stretch;
   background: #0f1116; border-top: 1px solid rgba(255, 255, 255, .08); z-index: 30;
 }
