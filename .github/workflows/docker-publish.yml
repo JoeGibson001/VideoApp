@@ -92,9 +92,10 @@ jobs:
           context: ${{ matrix.context }}
           target: ${{ matrix.target }}
           platforms: linux/amd64
-          push: true
-          # Plain single-platform manifests. With attestations the tag becomes an OCI index, and
-          # Unraid's update check compares the wrong digest and reports "update available" forever.
+          # Push as plain Docker v2 manifests: no attestations (they turn the tag into an index) and no
+          # OCI media types. GHCR does not answer a Docker-v2-only manifest request for an OCI image,
+          # so Unraid's update check sees the wrong digest and reports "update available" forever.
+          outputs: type=registry,oci-mediatypes=false
           provenance: false
           sbom: false
           tags: ${{ steps.meta.outputs.tags }}
